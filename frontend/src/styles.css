@@ -839,7 +839,7 @@ h3 {
   height: 100vh;
   display: grid;
   place-items: start center;
-  padding: 60px 24px 34px;
+  padding: 20px 24px 20px;
   background: transparent;
 }
 
@@ -912,29 +912,42 @@ h3 {
 }
 
 .command-stack {
-  min-width: 0;
-  flex: 1;
-  display: grid;
-  gap: 8px;
+  flex: 1 1 100%;
 }
 
 .command-input {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 12px;
-  width: 100%;
+  width: 90%;
   margin: 0 auto;
-  padding: 8px 10px 8px 16px;
+  padding: 10px 10px 10px 16px;
   border-radius: 16px;
   border: 1px solid rgba(255, 120, 105, 0.35);
   background: var(--bg-1);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
-.command-input input {
+.command-input textarea {
   width: 100%;
   font-size: 15px;
   letter-spacing: 0.01em;
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  color: var(--text-strong) !important;
+  resize: none !important;
+  overflow: hidden !important;
+  height: 24px;
+  min-height: 24px;
+  max-height: 200px;
+  line-height: 1.5;
+  padding: 0;
+  box-shadow: none !important;
+}
+
+.command-input textarea::placeholder {
+  color: var(--text-muted) !important;
 }
 
 .command-send {
@@ -1155,6 +1168,7 @@ h3 {
     transform: translateY(-8px);
     opacity: 0;
   }
+
   to {
     transform: translateY(0);
     opacity: 1;

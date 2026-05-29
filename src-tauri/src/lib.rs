@@ -64,6 +64,15 @@ fn show_command_bar(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn resize_command_window(app: AppHandle, height: f64) -> Result<(), String> {
+    if let Some(command) = app.get_webview_window("command") {
+        let size = tauri::LogicalSize::new(760.0, height);
+        command.set_size(size).map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
 fn run_python_worker(app: &AppHandle, question: &str) -> Result<String, String> {
     let root = project_root(app)?;
     let script = root.join("python").join("main.py");
@@ -207,7 +216,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![run_tutor, show_overlay, hide_overlay, show_command_bar])
+        .invoke_handler(tauri::generate_handler![run_tutor, show_overlay, hide_overlay, show_command_bar, resize_command_window])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();

@@ -16,3 +16,7 @@ export async function hideOverlay(): Promise<void> {
 export async function showCommandBar(): Promise<void> {
   return invoke('show_command_bar');
 }
+
+export async function resizeCommandWindow(height: number): Promise<void> {
+  return invoke('resize_command_window', { height });
+}

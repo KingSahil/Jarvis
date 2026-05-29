@@ -2,7 +2,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ArrowUp, Loader2, Minus, Sparkles, X, Settings, Check } from 'lucide-react';
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { runTutor, showOverlay } from './lib/tauri';
+import { runTutor, showOverlay, resizeCommandWindow } from './lib/tauri';
 
 export function CommandBar() {
   const [question, setQuestion] = useState('');
@@ -14,12 +14,13 @@ export function CommandBar() {
   const [provider, setProvider] = useState('groq');
   const [shortcut, setShortcut] = useState('Enter');
 
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const toggleButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const showStatus = isRunning || status !== defaultStatus;
 
+  // Focus input when open-command event is heard
   useEffect(() => {
     const focusInput = () => window.setTimeout(() => inputRef.current?.focus(), 60);
     focusInput();
@@ -30,6 +31,7 @@ export function CommandBar() {
     };
   }, []);
 
+  // Handle clicking outside settings dropdown
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -48,6 +50,20 @@ export function CommandBar() {
     };
   }, []);
 
+  // Automatically resize command window height based on UI expansion state
+  useEffect(() => {
+    const isExpanded = showSettings || steps.length > 0 || isRunning;
+    const targetHeight = isExpanded ? 580 : 170;
+    void resizeCommandWindow(targetHeight);
+  }, [showSettings, steps, isRunning]);
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setQuestion(event.target.value);
+    const textarea = event.target;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  };
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     const trimmed = question.trim();
@@ -64,6 +80,9 @@ export function CommandBar() {
       setStatus(result.summary);
       setSteps(result.steps || []);
       setQuestion('');
+      if (inputRef.current) {
+        inputRef.current.style.height = 'auto'; // Reset textarea height on submit
+      }
     } catch (error) {
       await currentWindow.setFocus();
       setStatus(error instanceof Error ? error.message : String(error));
@@ -184,12 +203,19 @@ export function CommandBar() {
 
         <div className="command-stack">
           <div className="command-input">
-            <input
+            <textarea
               ref={inputRef}
+              rows={1}
               value={question}
-              onChange={(event) => setQuestion(event.target.value)}
+              onChange={handleInputChange}
               placeholder="Ask anything..."
               autoFocus
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void submit(event);
+                }
+              }}
             />
             <button className="command-send" type="submit" disabled={isRunning || question.trim().length === 0}>
               {isRunning ? <Loader2 className="spin" size={16} /> : <ArrowUp size={16} />}
