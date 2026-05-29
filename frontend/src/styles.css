@@ -58,6 +58,9 @@ button {
     linear-gradient(145deg, var(--bg-1), var(--bg-0));
   color: var(--text-strong);
   isolation: isolate;
+  border-radius: 12px;
+  border: 1px solid var(--accent-glow);
+  background-clip: padding-box;
 }
 
 .app-shell::before,
@@ -94,14 +97,12 @@ button {
 }
 
 .titlebar {
-  height: 68px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px 0 22px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(10, 8, 10, 0.55);
-  backdrop-filter: blur(18px);
+  padding: 0 16px;
+  background: transparent;
   position: relative;
   z-index: 1;
 }
@@ -160,7 +161,7 @@ h3 {
 .workspace,
 .settings-workspace,
 .app-workspace {
-  height: calc(100vh - 68px);
+  height: calc(100vh - 48px);
   display: grid;
   gap: 16px;
   padding: 0 18px 18px;
@@ -261,6 +262,34 @@ h3 {
   opacity: 1;
   transform: translateX(0);
   transition: opacity 0.3s ease, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), padding 0.4s ease, border-width 0.4s ease;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 16px;
+}
+
+.window-control-btn {
+  background: transparent;
+  color: var(--text-muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.window-control-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-strong);
+}
+
+.window-control-btn.close-btn:hover {
+  background: rgba(255, 80, 80, 0.8);
+  color: #fff;
 }
 
 .app-workspace.settings-closed .settings-panel {
@@ -925,7 +954,9 @@ h3 {
 }
 
 .command-meta {
-  display: grid;
+  width: 100%;
+  display: flex;
+  justify-content: center;
   gap: 4px;
   color: var(--text-muted);
   font-size: 13px;
@@ -935,6 +966,11 @@ h3 {
 
 .command-status {
   color: #f0c5ba;
+  width: 100%;
+  display: block;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 4px;
 }
 
 .command-hint {

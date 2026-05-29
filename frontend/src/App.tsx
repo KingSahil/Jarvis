@@ -9,8 +9,12 @@ import {
   Sparkles,
   UserCircle2,
   Loader2,
+  Minus,
+  Square,
+  X
 } from 'lucide-react';
 import { useState, FormEvent } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { hideOverlay, showCommandBar, showOverlay, runTutor } from './lib/tauri';
 
 export function App() {
@@ -61,15 +65,22 @@ export function App() {
           <div className="brand-mark">
             <Sparkles size={18} />
           </div>
-          <div>
-            <h1>Clicky</h1>
-            <span>Configuration and status</span>
-          </div>
         </div>
         <div className="titlebar-actions">
           <div className="ready-pill">
             <CheckCircle2 size={15} />
             Ready
+          </div>
+          <div className="window-controls">
+            <button className="window-control-btn hint" onClick={() => getCurrentWindow().minimize()}>
+              <Minus size={16} />
+            </button>
+            <button className="window-control-btn hint" onClick={() => getCurrentWindow().toggleMaximize()}>
+              <Square size={14} />
+            </button>
+            <button className="window-control-btn close-btn" onClick={() => getCurrentWindow().close()}>
+              <X size={16} />
+            </button>
           </div>
         </div>
       </header>

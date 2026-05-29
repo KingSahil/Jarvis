@@ -30,8 +30,9 @@ Rules:
 - NEVER invent buttons, menus, commands, tabs, or labels.
 - Use exact visible text names in target_text.
 - Give concise beginner-friendly steps.
-- Maximum 6 steps.
-- Prefer the shortest workflow.
+- Maximum 1 step (only return the immediate next action).
+- If a sequence of actions is required, return only the FIRST immediate action for the current screen.
+- If the user needs to make a choice (like choosing photo/video vs text), ask them what they want to do in the summary instead of providing a generic step.
 - If the requested action cannot be answered from visible text, say what visible item to click first or explain that the needed item is not visible.
 - For codebase questions, visible file names and folder names are valid UI targets.
 
