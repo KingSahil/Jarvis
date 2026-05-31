@@ -46,32 +46,47 @@ export function Overlay() {
 
           const key = `${step.step}-${step.target_text}-${match.x}-${match.y}`;
 
-          // Raw dimensions in overlay CSS pixels
-          const rawLeft = Math.round(match.x * scaleX);
-          const rawTop = Math.round(match.y * scaleY);
-          const rawWidth = Math.max(8, Math.round(match.width * scaleX));
-          const rawHeight = Math.max(8, Math.round(match.height * scaleY));
+          const scaledW = match.width * scaleX;
+          const scaledH = match.height * scaleY;
+          
+          const textStr = match.text ? String(match.text).trim() : '';
+          const isIcon = 
+            match.control_type === 'Image' ||
+            (scaledW <= 40 && scaledH <= 40) ||
+            (scaledW <= 48 && scaledH <= 48 && textStr.length <= 1);
+
+          const paddingX = isIcon ? 4 : 20; 
+          const paddingY = isIcon ? 4 : 8;  
+
+          const rawLeft = Math.round(match.x * scaleX) - Math.round(paddingX / 2);
+          const rawTop = Math.round(match.y * scaleY) - Math.round(paddingY / 2);
+          const rawWidth = Math.max(8, Math.round(match.width * scaleX)) + paddingX;
+          const rawHeight = Math.max(8, Math.round(match.height * scaleY)) + paddingY;
 
           // Cap to MAX_BOX, keeping the element center fixed
           // EXCEPT for wide elements (like sidebar lists) where we align to the left edge (with a small margin)
           // where the folder icon and text are actually situated!
-          const MAX_BOX_WIDTH = 120;
-          const MAX_BOX_HEIGHT = 40;
-          const displayHeight = Math.min(rawHeight, MAX_BOX_HEIGHT);
+          const MAX_BOX_WIDTH = isIcon ? 100 : 140;
+          const MAX_BOX_HEIGHT = isIcon ? 40 : 44;
 
-          let displayWidth = Math.min(rawWidth, MAX_BOX_WIDTH);
+          // Enforce a minimum size of 36px for all highlights to ensure they are easily visible,
+          // particularly for small icons and dots!
+          const MIN_BOX_SIZE = 36;
+          const displayHeight = Math.min(Math.max(MIN_BOX_SIZE, rawHeight), MAX_BOX_HEIGHT);
+
+          let displayWidth = Math.min(Math.max(MIN_BOX_SIZE, rawWidth), MAX_BOX_WIDTH);
           let displayLeft = rawLeft;
 
-          if (rawWidth > 120) {
+          if (!isIcon && rawWidth > 140) {
             // Wide elements (likely list/sidebar rows):
-            // Snugly fit the width by estimating character length (icon offset + chars * 7px + padding)
+            // Fit the width comfortably by estimating character length
             const textLength = match.text ? String(match.text).length : 8;
-            const estimatedWidth = 24 + textLength * 7.2 + 16;
+            const estimatedWidth = 24 + textLength * 7.2 + 28;
             
-            displayWidth = Math.min(rawWidth, Math.max(45, Math.round(estimatedWidth)));
+            displayWidth = Math.min(rawWidth, Math.max(55, Math.round(estimatedWidth)));
             
-            // Wide elements: align to the left (shifted 28px right to cover text snugly instead of expand arrows)
-            displayLeft = rawLeft + 28;
+            // Wide elements: align to the left (shifted 20px right to cover text comfortably)
+            displayLeft = rawLeft + 20;
           } else {
             // Normal elements: center them
             displayLeft = rawLeft + Math.round((rawWidth - displayWidth) / 2);

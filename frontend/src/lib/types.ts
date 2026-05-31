@@ -5,6 +5,7 @@ export interface OcrItem {
   width: number;
   height: number;
   confidence: number;
+  control_type?: string;
 }
 
 export interface TutorStep {

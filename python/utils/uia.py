@@ -97,8 +97,53 @@ def get_visible_ui_text(window=None, target_pid: int | None = None) -> list[dict
                     "height": height,
                     "confidence": 0.98,
                     "source": "uia",
+                    "control_type": ctype,
                 }
             )
+
+        # Capture Blinky's own settings button in its floating window header!
+        try:
+            from pywinauto import Desktop
+            for w in Desktop(backend="uia").windows():
+                pname = ""
+                try:
+                    import psutil
+                    pname = psutil.Process(w.process_id()).name().lower()
+                except Exception:
+                    pass
+                if "blinky" in pname or "blinky" in (w.window_text() or "").lower():
+                    for el in w.descendants():
+                        try:
+                            if el.element_info.control_type not in {"Button", "Image", "Pane"}:
+                                continue
+                            text = _element_text(el)
+                            if not text or "settings" not in text.lower():
+                                continue
+                            if not el.is_visible():
+                                continue
+                            rect = el.rectangle()
+                            width = max(0, int(rect.width()))
+                            height = max(0, int(rect.height()))
+                            if width < 4 or height < 4:
+                                continue
+                            x = int(rect.left)
+                            y = int(rect.top)
+                            items.append({
+                                "text": text,
+                                "x": x,
+                                "y": y,
+                                "width": width,
+                                "height": height,
+                                "confidence": 0.98,
+                                "source": "blinky",
+                                "control_type": el.element_info.control_type,
+                            })
+                            LOGGER.info("UIA: Captured Blinky control element '%s' at (%d, %d)", text, x, y)
+                        except Exception:
+                            continue
+                    break
+        except Exception as exc:
+            LOGGER.warning("UIA: failed to scan Blinky window controls: %s", exc)
 
         # Debug: log sidebar-region elements so we can verify positions
         sidebar_items = [i for i in items if i["x"] <= 100]
