@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -225,16 +227,55 @@ def run(question: str, previous_question: str | None = None, progress: dict | No
 
 
 def classify_request(question: str, previous_question: str | None, warnings: list[str]) -> dict | None:
+    q_low = question.lower().strip()
+    
+    # Heuristic overrides for is_continuation
+    heur_continuation = False
+    if previous_question:
+        continuation_patterns = [
+            "where is that", "where's that", "where is it", "where's it", "where is this", 
+            "where's this", "where is that thing", "show me", "point to it", "locate it",
+            "next", "continue", "now what", "what next", "what to do", "go on", "done", 
+            "finished", "completed"
+        ]
+        if any(pat in q_low for pat in continuation_patterns):
+            heur_continuation = True
+        else:
+            # Action/location word + pronoun/deictic reference
+            location_words = {"where", "show", "point", "locate", "find", "click", "open", "highlight"}
+            deictic_words = {"it", "that", "this", "thing", "here", "there", "them", "those", "button", "icon", "link"}
+            words = set(re.findall(r'[a-z]+', q_low))
+            if words & location_words and words & deictic_words:
+                heur_continuation = True
+
+    # Heuristic overrides for needs_screen
+    heur_needs_screen = False
+    screen_patterns = [
+        "where is", "where's", "where are", "show me", "point to", "locate", 
+        "find the", "how do i find", "where can i find", "click", "open", 
+        "select", "press", "highlight"
+    ]
+    if any(pat in q_low for pat in screen_patterns):
+        heur_needs_screen = True
+
     try:
         payload = ask_text_model(build_preflight_prompt(question, previous_question))
     except Exception as exc:
         LOGGER.warning("Preflight classification failed; falling back to screen mode: %s", exc)
         warnings.append(f"Preflight classification failed: {exc}")
-        return None
+        return {
+            "needs_screen": True,
+            "is_continuation": heur_continuation or (previous_question is not None and q_low in {"next", "done", "continue"})
+        }
 
-    needs_screen = bool(payload.get("needs_screen", True))
-    is_continuation = bool(payload.get("is_continuation", False))
+    needs_screen = bool(payload.get("needs_screen", True)) or heur_needs_screen
+    is_continuation = bool(payload.get("is_continuation", False)) or heur_continuation
+    
+    if is_continuation:
+        needs_screen = True
+        
     return {"needs_screen": needs_screen, "is_continuation": is_continuation}
+
 
 
 def answer_without_screen(question: str) -> dict:

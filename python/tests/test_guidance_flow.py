@@ -296,6 +296,19 @@ class GuidanceFlowTests(unittest.TestCase):
         self.assertTrue(result["is_continuation"])
         mock_capture.assert_called_once()
 
+    def test_heuristic_classification_continuation(self) -> None:
+        from main import classify_request
+        with patch("main.ask_text_model", return_value={"needs_screen": False, "is_continuation": False}):
+            res = classify_request("where is that thing", "click on extensions", [])
+            self.assertEqual(res, {"needs_screen": True, "is_continuation": True})
+
+    def test_heuristic_classification_needs_screen(self) -> None:
+        from main import classify_request
+        with patch("main.ask_text_model", return_value={"needs_screen": False, "is_continuation": False}):
+            res = classify_request("where is the close button", None, [])
+            self.assertEqual(res, {"needs_screen": True, "is_continuation": False})
+
+
 
 if __name__ == "__main__":
     unittest.main()

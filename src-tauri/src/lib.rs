@@ -27,6 +27,18 @@ struct GlobalClick {
     scale_factor: f64,
 }
 
+enum SttMessage {
+    Audio(Vec<u8>),
+    Close,
+}
+
+struct AppState {
+    child: std::sync::Mutex<Option<std::process::Child>>,
+    child_stdin: std::sync::Mutex<Option<std::process::ChildStdin>>,
+    child_stdout: std::sync::Mutex<Option<BufReader<std::process::ChildStdout>>>,
+    stt_tx: std::sync::Mutex<Option<std::sync::mpsc::Sender<SttMessage>>>,
+}
+
 #[tauri::command]
 async fn run_tutor(app: AppHandle, request: TutorRequest) -> Result<serde_json::Value, String> {
     let overlay = app.get_webview_window("overlay");
@@ -46,14 +58,17 @@ async fn run_tutor(app: AppHandle, request: TutorRequest) -> Result<serde_json::
     // Give DWM a tiny moment to apply display affinity before screenshot
     thread::sleep(Duration::from_millis(40));
 
+    let state = app.state::<AppState>();
     let output_res = run_python_worker(
         &app,
+        &state,
         &request.question,
         request.previous_question.as_deref(),
         request.progress.as_ref(),
         command.clone(),
         overlay.clone(),
     );
+
 
     // Fallback: restore capture visibility in case of errors or if not restored by worker
     if let Some(ref w) = command {
@@ -212,6 +227,151 @@ async fn save_settings(app: AppHandle, provider: String, shortcut: String, sarva
     Ok(())
 }
 
+#[tauri::command]
+async fn start_stt_stream(app: AppHandle) -> Result<(), String> {
+    let root = project_root(&app)?;
+    let env_vars = read_env_file(&root);
+    let mut api_key = "".to_string();
+    for (key, val) in env_vars {
+        if key == "SARVAM_API_KEY" {
+            api_key = val;
+        }
+    }
+
+    if api_key.is_empty() {
+        return Err("SARVAM_API_KEY is not set in settings".to_string());
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel::<SttMessage>();
+    
+    let state = app.state::<AppState>();
+    let mut stt_tx_guard = state.stt_tx.lock().map_err(|err| err.to_string())?;
+    *stt_tx_guard = Some(tx);
+
+    let app_clone = app.clone();
+    thread::spawn(move || {
+        let url = "wss://api.sarvam.ai/speech-to-text/ws";
+        
+        let request = http::Request::builder()
+            .uri(url)
+            .header("api-subscription-key", &api_key)
+            .body(())
+            .expect("Failed to build request");
+
+        let mut socket = match tungstenite::connect(request) {
+            Ok((socket, _)) => socket,
+            Err(err) => {
+                eprintln!("Failed to connect to Sarvam STT WebSocket: {:?}", err);
+                return;
+            }
+        };
+
+        let stream = socket.get_mut();
+        match stream {
+            tungstenite::stream::MaybeTlsStream::Plain(s) => {
+                let _ = s.set_read_timeout(Some(Duration::from_millis(50)));
+            }
+            tungstenite::stream::MaybeTlsStream::Rustls(s) => {
+                let _ = s.get_mut().set_read_timeout(Some(Duration::from_millis(50)));
+            }
+            _ => {}
+        }
+
+
+        let config = serde_json::json!({
+            "type": "config",
+            "data": {
+                "model": "saaras:v3",
+                "language_code": "en-IN",
+                "audio_format": "pcm_s16le"
+            }
+        });
+        if let Err(err) = socket.send(tungstenite::Message::Text(config.to_string())) {
+            eprintln!("Failed to send config message: {:?}", err);
+            return;
+        }
+
+        let mut last_ping = std::time::Instant::now();
+
+        loop {
+            while let Ok(msg) = rx.try_recv() {
+                match msg {
+                    SttMessage::Audio(data) => {
+                        if let Err(err) = socket.send(tungstenite::Message::Binary(data)) {
+                            eprintln!("Failed to send audio chunk: {:?}", err);
+                            break;
+                        }
+                    }
+                    SttMessage::Close => {
+                        let _ = socket.close(None);
+                        return;
+                    }
+                }
+            }
+
+            if last_ping.elapsed() >= Duration::from_secs(20) {
+                let ping = serde_json::json!({
+                    "type": "ping"
+                });
+                if let Err(err) = socket.send(tungstenite::Message::Text(ping.to_string())) {
+                    eprintln!("Failed to send keepalive ping: {:?}", err);
+                    break;
+                }
+                last_ping = std::time::Instant::now();
+            }
+
+            match socket.read() {
+                Ok(tungstenite::Message::Text(text)) => {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(transcript) = json.get("transcript").and_then(|t| t.as_str()) {
+                            let _ = app_clone.emit("blinky://stt-transcript", transcript);
+                        } else if let Some(model_output) = json.get("model_output").and_then(|m| m.as_str()) {
+                            let _ = app_clone.emit("blinky://stt-transcript", model_output);
+                        } else if let Some(t) = json.get("text").and_then(|t| t.as_str()) {
+                            let _ = app_clone.emit("blinky://stt-transcript", t);
+                        }
+                    }
+                }
+                Ok(tungstenite::Message::Close(_)) => {
+                    break;
+                }
+                Err(tungstenite::Error::Io(ref err)) if err.kind() == std::io::ErrorKind::WouldBlock || err.kind() == std::io::ErrorKind::TimedOut => {
+                    // Expected timeout
+                }
+                Err(err) => {
+                    eprintln!("WebSocket read error: {:?}", err);
+                    break;
+                }
+                _ => {}
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_audio_chunk(app: AppHandle, chunk: Vec<u8>) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let stt_tx_guard = state.stt_tx.lock().map_err(|err| err.to_string())?;
+    if let Some(ref tx) = *stt_tx_guard {
+        let _ = tx.send(SttMessage::Audio(chunk));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_stt_stream(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut stt_tx_guard = state.stt_tx.lock().map_err(|err| err.to_string())?;
+    if let Some(tx) = stt_tx_guard.take() {
+        let _ = tx.send(SttMessage::Close);
+    }
+    Ok(())
+}
+
 fn get_active_shortcut_from_env(app: &AppHandle) -> String {
     if let Ok(root) = project_root(app) {
         let env_vars = read_env_file(&root);
@@ -224,29 +384,64 @@ fn get_active_shortcut_from_env(app: &AppHandle) -> String {
     "Enter".to_string()
 }
 
+fn get_or_spawn_worker(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let mut child_guard = state.child.lock().map_err(|err| err.to_string())?;
+
+    let is_running = if let Some(ref mut child) = *child_guard {
+        match child.try_wait() {
+            Ok(None) => true, // Still running
+            _ => false,       // Exited or error
+        }
+    } else {
+        false
+    };
+
+    if !is_running {
+        let root = project_root(app)?;
+        let script = root.join("python").join("main.py");
+        let python = python_executable(&root);
+        let env_file_vars = read_env_file(&root);
+
+        let mut child = Command::new(python)
+            .arg(script)
+            .current_dir(&root)
+            .env("PYTHONWARNINGS", "ignore")
+            .envs(env_file_vars)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|err| format!("Failed to start persistent Python worker: {err}"))?;
+
+        let child_stdin = child.stdin.take().ok_or("Failed to open child stdin")?;
+        let child_stdout = child.stdout.take().ok_or("Failed to open child stdout")?;
+        let reader = BufReader::new(child_stdout);
+
+        *child_guard = Some(child);
+        *state.child_stdin.lock().map_err(|err| err.to_string())? = Some(child_stdin);
+        *state.child_stdout.lock().map_err(|err| err.to_string())? = Some(reader);
+        println!("Persistent Python worker spawned successfully!");
+    }
+
+    Ok(())
+}
+
 fn run_python_worker(
     app: &AppHandle,
+    state: &AppState,
     question: &str,
     previous_question: Option<&str>,
     progress: Option<&serde_json::Value>,
     command_window: Option<WebviewWindow>,
     overlay_window: Option<WebviewWindow>,
 ) -> Result<String, String> {
-    let root = project_root(app)?;
-    let script = root.join("python").join("main.py");
-    let python = python_executable(&root);
-    let env_file_vars = read_env_file(&root);
+    get_or_spawn_worker(app, state)?;
 
-    let mut child = Command::new(python)
-        .arg(script)
-        .current_dir(&root)
-        .env("PYTHONWARNINGS", "ignore")
-        .envs(env_file_vars)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| format!("Failed to start Python worker: {err}"))?;
+    let mut stdin_guard = state.child_stdin.lock().map_err(|err| err.to_string())?;
+    let mut stdout_guard = state.child_stdout.lock().map_err(|err| err.to_string())?;
+
+    let child_stdin = stdin_guard.as_mut().ok_or("Stdin is not initialized")?;
+    let child_stdout = stdout_guard.as_mut().ok_or("Stdout is not initialized")?;
 
     let payload = serde_json::json!({
         "question": question,
@@ -254,53 +449,35 @@ fn run_python_worker(
         "progress": progress.unwrap_or(&serde_json::Value::Null),
     });
 
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(payload.to_string().as_bytes())
-            .map_err(|err| format!("Failed to write to Python worker: {err}"))?;
-    }
+    child_stdin
+        .write_all((payload.to_string() + "\n").as_bytes())
+        .map_err(|err| format!("Failed to write to Python worker: {err}"))?;
+    child_stdin.flush().map_err(|err| format!("Failed to flush stdin: {err}"))?;
 
-    let child_stdout = child.stdout.take().ok_or("Failed to open Python worker stdout")?;
-    let mut reader = BufReader::new(child_stdout);
-    let mut stdout_accumulated = String::new();
-    let mut line = String::new();
-    let mut restored = false;
-
-    while reader.read_line(&mut line).unwrap_or(0) > 0 {
-        let trimmed = line.trim();
-        if trimmed == "__BLINKY_CAPTURED__" {
-            if !restored {
-                // Restore capture visibility immediately after screenshot is captured
-                if let Some(ref w) = command_window {
-                    set_window_capture_exclusion(w, false);
-                }
-                if let Some(ref w) = overlay_window {
-                    set_window_capture_exclusion(w, false);
-                }
-                restored = true;
-            }
-        } else {
-            stdout_accumulated.push_str(&line);
+    let mut line1 = String::new();
+    child_stdout
+        .read_line(&mut line1)
+        .map_err(|err| format!("Failed to read response line 1 from Python worker: {err}"))?;
+    
+    let trimmed1 = line1.trim();
+    if trimmed1 == "__BLINKY_CAPTURED__" {
+        if let Some(ref w) = command_window {
+            set_window_capture_exclusion(w, false);
         }
-        line.clear();
-    }
-
-    let stderr_reader = child.stderr.take().map(BufReader::new);
-    let status = child.wait().map_err(|err| format!("Failed to wait for python worker: {err}"))?;
-
-    if !status.success() {
-        let mut stderr_str = String::new();
-        if let Some(mut r) = stderr_reader {
-            let _ = std::io::Read::read_to_string(&mut r, &mut stderr_str);
+        if let Some(ref w) = overlay_window {
+            set_window_capture_exclusion(w, false);
         }
-        if let Some(error) = parse_worker_error(&stdout_accumulated) {
-            return Err(error);
-        }
-        return Err(format!("Python worker exited with {status}: {stderr_str}"));
+        
+        let mut line2 = String::new();
+        child_stdout
+            .read_line(&mut line2)
+            .map_err(|err| format!("Failed to read JSON response from Python worker: {err}"))?;
+        Ok(line2.to_string())
+    } else {
+        Ok(line1.to_string())
     }
-
-    Ok(stdout_accumulated)
 }
+
 
 fn ensure_env_file(root: &PathBuf) {
     let env_path = root.join(".env");
@@ -354,6 +531,7 @@ fn trim_env_value(value: &str) -> String {
     value.to_string()
 }
 
+#[allow(dead_code)]
 fn parse_worker_error(stdout: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).ok()?;
     parsed
@@ -442,7 +620,10 @@ pub fn run() {
             resize_command_window,
             resize_and_move_command_window,
             get_settings,
-            save_settings
+            save_settings,
+            start_stt_stream,
+            send_audio_chunk,
+            stop_stt_stream
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -456,6 +637,13 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
+            app.manage(AppState {
+                child: std::sync::Mutex::new(None),
+                child_stdin: std::sync::Mutex::new(None),
+                child_stdout: std::sync::Mutex::new(None),
+                stt_tx: std::sync::Mutex::new(None),
+            });
+
             setup_tray(app)?;
 
             if let Some(overlay) = app.get_webview_window("overlay") {
@@ -495,6 +683,7 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("failed to run Blinky");
 }
+
 
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let show_command = MenuItem::with_id(app, "show_command", "Open", true, None::<&str>)?;

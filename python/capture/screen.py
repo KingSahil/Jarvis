@@ -20,8 +20,11 @@ class Screenshot:
     screen_height: int  # actual capture height before scaling (≈ physical screen height)
 
 
+_CAMERA = None
+
 def capture_screen() -> Screenshot:
     """Capture the primary display with dxcam, falling back to PIL ImageGrab."""
+    global _CAMERA
     captures_dir = Path("tmp") / "captures"
     captures_dir.mkdir(parents=True, exist_ok=True)
     path = captures_dir / f"screen-{int(time.time() * 1000)}.jpg"
@@ -36,8 +39,14 @@ def capture_screen() -> Screenshot:
     try:
         import dxcam
 
-        camera = dxcam.create(output_color="RGB")
-        frame = camera.grab()
+        if _CAMERA is None:
+            _CAMERA = dxcam.create(output_color="RGB")
+        
+        frame = _CAMERA.grab()
+        if frame is None:
+            time.sleep(0.01)
+            frame = _CAMERA.grab()
+
         if frame is None:
             raise RuntimeError("dxcam returned no frame")
 
