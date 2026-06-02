@@ -4,6 +4,8 @@ export interface SarvamTtsPayload {
   target_language_code: 'en-IN';
   speaker: 'ratan';
   pace: number;
+  speech_sample_rate: 16000;
+  output_audio_codec: 'mp3';
 }
 
 export function buildSarvamTtsPayload(text: string): SarvamTtsPayload {
@@ -13,7 +15,36 @@ export function buildSarvamTtsPayload(text: string): SarvamTtsPayload {
     target_language_code: 'en-IN',
     speaker: 'ratan',
     pace: 1.05,
+    speech_sample_rate: 16000,
+    output_audio_codec: 'mp3',
   };
+}
+
+export interface SpeechStep {
+  step?: number;
+  instruction?: string;
+}
+
+export function buildSpeechContent(
+  summaryText: string,
+  stepsList: SpeechStep[] = [],
+  options: { includeSteps?: boolean } = {},
+): string {
+  const summary = summaryText.trim();
+  if (!options.includeSteps || stepsList.length === 0) {
+    return summary;
+  }
+
+  const stepText = stepsList
+    .map((step, idx) => {
+      const instruction = step.instruction?.trim();
+      if (!instruction) return null;
+      return `Step ${step.step || idx + 1}. ${instruction}`;
+    })
+    .filter(Boolean)
+    .join(' ');
+
+  return stepText ? `${summary.replace(/[.!?]+$/, '')}. Steps: ${stepText}` : summary;
 }
 
 export function getSarvamErrorMessage(payload: unknown, status: number): string {
@@ -28,7 +59,7 @@ export function getSarvamErrorMessage(payload: unknown, status: number): string 
   return status > 0 ? `Sarvam TTS failed with status ${status}` : 'Sarvam TTS failed.';
 }
 
-export function buildAudioDataUrl(base64Audio: string, mimeType = 'audio/wav'): string {
+export function buildAudioDataUrl(base64Audio: string, mimeType = 'audio/mpeg'): string {
   return `data:${mimeType};base64,${base64Audio}`;
 }
 

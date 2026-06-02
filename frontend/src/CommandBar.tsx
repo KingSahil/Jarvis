@@ -4,7 +4,7 @@ import { ArrowUp, Loader2, Minus, Sparkles, X, Settings, Check, Mic, Volume2 } f
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { getCasualChatResponse } from './lib/casualChat';
 import { runTutor, showOverlay, resizeCommandWindow, getSettings, saveSettings, resizeAndMoveCommandWindow } from './lib/tauri';
-import { buildAudioDataUrl, buildSarvamTtsPayload, getSarvamErrorMessage } from './lib/tts';
+import { buildAudioDataUrl, buildSarvamTtsPayload, buildSpeechContent, getSarvamErrorMessage } from './lib/tts';
 
 export function CommandBar() {
   const [question, setQuestion] = useState('');
@@ -97,19 +97,13 @@ export function CommandBar() {
     };
   }, []);
 
-  const speakText = async (summaryText: string, stepsList: any[]) => {
+  const speakText = async (summaryText: string, stepsList: any[], options: { includeSteps?: boolean } = {}) => {
     if (!sarvamApiKey) {
       setStatus('Please set your Sarvam AI API Key in settings first.');
       return;
     }
     
-    let speechContent = summaryText;
-    if (stepsList && stepsList.length > 0) {
-      speechContent += ". Here are the steps to follow: ";
-      stepsList.forEach((step, idx) => {
-        speechContent += `Step ${step.step || (idx + 1)}. ${step.instruction}. `;
-      });
-    }
+    const speechContent = buildSpeechContent(summaryText, stepsList, options);
 
     setIsSpeaking(true);
     try {
@@ -159,7 +153,7 @@ export function CommandBar() {
     if (isSpeaking) {
       stopSpeaking();
     } else if (status && status !== defaultStatus) {
-      void speakText(status, steps);
+      void speakText(status, steps, { includeSteps: true });
     }
   };
 
@@ -265,9 +259,7 @@ export function CommandBar() {
         inputRef.current.style.height = 'auto';
       }
       if (shouldSpeakAfter) {
-        setTimeout(() => {
-          void speakText(casualResponse.summary, []);
-        }, 300);
+        void speakText(casualResponse.summary, []);
       }
       return;
     }
@@ -290,9 +282,7 @@ export function CommandBar() {
       }
       
       if (shouldSpeakAfter && result.summary) {
-        setTimeout(() => {
-          void speakText(result.summary, result.steps || []);
-        }, 300);
+        void speakText(result.summary, []);
       }
     } catch (error) {
       await currentWindow.setFocus();
