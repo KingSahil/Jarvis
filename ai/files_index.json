@@ -1,8 +1,12 @@
 {
   "files": [
-    {"path": "ai/repo_summary.md", "desc": "Master entryway, quick overview, and current AI guidance behavior documentation"},
-    {"path": "ai/architecture.md", "desc": "System architecture, multi-process flows, IPC contracts, coordinate scaling, post-processing pipeline, capture exclusion, single-step mode, and troubleshooting"},
-    {"path": "ai/detailed_summaries.md", "desc": "Function-by-function reference: preflight classifier, continuation detection, step post-processors (skip_navigation, fill_search_targets), matching scoring formula with all bonuses, token limits, and prompt builder rules"},
+    {"path": "ai/repo_summary.md", "desc": "Master entryway, quick overview, and table of contents linking all sub-guides"},
+    {"path": "ai/architecture.md", "desc": "System architecture, multi-process flows, request lifecycle sequence, native Rust tauri config, and developer guidelines"},
+    {"path": "ai/coordinate_scaling.md", "desc": "Coordinate scaling and resolution normalization: physical screens to downsampled screenshots and overlay browser CSS pixels"},
+    {"path": "ai/matching_heuristics.md", "desc": "Target fuzzy-matching scoring matrix, bonuses, penalties, UIA-OCR coordinate merging, and step post-processors"},
+    {"path": "ai/ai_inference.md", "desc": "Preflight request classifier, continuation logic, single-step prompts, Ollama local client, and cloud Groq client"},
+    {"path": "ai/sarvam.md", "desc": "Sarvam AI voice integration: text-to-speech payloads, speech-to-text multipart forms, audio elements, and React-Tauri settings hooks"},
+    {"path": "ai/detailed_summaries.md", "desc": "Granular, per-file API contracts and function specs for Rust commands, React views, and Python modules"},
     {"path": "frontend/src/App.tsx", "desc": "Tutor container with drag-resize, settings panel, dynamic height, no-polling reactive architecture"},
     {"path": "frontend/src/Overlay.tsx", "desc": "Fullscreen coordinate canvas placing pulsars on the single matched target; full-width bypass for input controls, icon/row highlight caps, and click dismissal"},
     {"path": "frontend/src/lib/tauri.ts", "desc": "Tauri JS interfaces mapping React commands, previous_question, and tutor progress to Rust bindings"},

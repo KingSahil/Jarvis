@@ -1,0 +1,93 @@
+# Blinky — Coordinate Scaling & Resolution Normalization Guide
+
+This document describes the mathematical formulas, scale transitions, and layout constraints used to map physical coordinate spaces to virtual overlay dimensions across process boundaries.
+
+---
+
+## 1. Physical vs. Downsampled Screenshot Space
+
+Screenshots can be captured at any physical desktop resolution (e.g., $2560 \times 1600$, $3840 \times 2160$). To optimize local OCR execution speeds and keep LLM input context within token budgets, `capture/screen.py` downsamples screenshots using Lanczos interpolation:
+
+$$\text{Max Width} = 1920 \text{ px}, \quad \text{Max Height} = 1080 \text{ px}$$
+
+The aspect ratio is strictly preserved.
+* **Example**: A physical screen of $2560 \times 1600$ (16:10 aspect ratio) downsamples to a screenshot of $1728 \times 1080$ pixels.
+* **Dataclass Representation**: The [Screenshot](file:///c:/projects/Jarvis/python/capture/screen.py) dataclass maintains both:
+  * `width` / `height`: Downsampled screenshot dimensions.
+  * `screen_width` / `screen_height`: Original physical desktop dimensions.
+
+---
+
+## 2. UIA Coordinate Normalization
+
+Windows UI Automation (UIA) returns control bounding rectangles in physical desktop coordinates (relative to the full display). EasyOCR/WinRT OCR results are extracted directly from the downsampled screenshot buffer, meaning they are already in downsampled screenshot-space.
+
+To align both coordinate systems in the same space, [main.py](file:///c:/projects/Jarvis/python/main.py) maps UIA bounds to screenshot-space bounds:
+
+### Scale Factors
+$$s_x = \frac{\text{screenshot.width}}{\text{screenshot.screen\_width}}$$
+
+$$s_y = \frac{\text{screenshot.height}}{\text{screenshot.screen\_height}}$$
+
+### Normalization Mapping
+For any coordinate pair $(x_{\text{uia}}, y_{\text{uia}})$:
+
+$$x_{\text{ss}} = \lfloor x_{\text{uia}} \times s_x \rceil$$
+
+$$y_{\text{ss}} = \lfloor y_{\text{uia}} \times s_y \rceil$$
+
+This scaling ensures that fuzzy matching and text calibration operate on identical pixel scales.
+
+---
+
+## 3. Overlay Viewport Display Scaling
+
+When the React frontend renders [Overlay.tsx](file:///c:/projects/Jarvis/frontend/src/Overlay.tsx), it must map screenshot-space coordinates back to CSS pixels matching the browser's viewport.
+
+### Viewport Ratios
+$$\text{scale}_x = \frac{\text{window.innerWidth}}{\text{screenshot.width}}$$
+
+$$\text{scale}_y = \frac{\text{window.innerHeight}}{\text{screenshot.height}}$$
+
+### Render Calculations
+$$\text{frame.left} = \text{round}(x_{\text{ss}} \times \text{scale}_x)$$
+
+$$\text{frame.top} = \text{round}(y_{\text{ss}} \times \text{scale}_y)$$
+
+$$\text{frame.width} = \text{round}(\text{width}_{\text{ss}} \times \text{scale}_x)$$
+
+$$\text{frame.height} = \text{round}(\text{height}_{\text{ss}} \times \text{scale}_y)$$
+
+---
+
+## 4. Highlight Box Sizing & Capping
+
+To prevent large highlight boxes from cluttering the screen or looking unpolished, [Overlay.tsx](file:///c:/projects/Jarvis/frontend/src/Overlay.tsx) applies custom sizing restrictions based on the control type:
+
+### Standard / Non-Input Controls
+For text, buttons, and icons, bounds are capped:
+```typescript
+const MAX_BOX_WIDTH = isIcon ? 100 : 140;
+const MAX_BOX_HEIGHT = isIcon ? 40 : 44;
+const MIN_BOX_SIZE = 36;
+
+const displayWidth = Math.min(Math.max(MIN_BOX_SIZE, rawWidth), MAX_BOX_WIDTH);
+const displayHeight = Math.min(Math.max(MIN_BOX_SIZE, rawHeight), MAX_BOX_HEIGHT);
+```
+*Standard elements are center-aligned when width/height constraints are active.*
+
+### Input Control Full-Width Bypass
+If the matched element is an input control (e.g. `Edit`, `TextBox`, `ComboBox`), the capping logic is bypassed to highlight the entire text input field:
+```typescript
+if (isInput) {
+  displayWidth = rawWidth;   // Use full element width
+  displayLeft = rawLeft;     // Bypasses centering shift offsets
+}
+```
+
+---
+
+## Related Guides & Files
+- [System Architecture](file:///c:/projects/Jarvis/ai/architecture.md)
+- [Overlay Frontend Component](file:///c:/projects/Jarvis/frontend/src/Overlay.tsx)
+- [Screen Capture Engine](file:///c:/projects/Jarvis/python/capture/screen.py)

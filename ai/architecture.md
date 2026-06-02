@@ -17,152 +17,146 @@ The system uses a multi-process architecture consisting of:
            ┌────────────────────────┐
            │        A. User         │
            └────────────────────────┘
-                        │
-                        ▼ (Hotkey)
+                         │
+                         ▼ (Hotkey)
            ┌────────────────────────┐
            │  B. Tauri App Shell    │
            │         (Rust)         │
            └────────────────────────┘
-            │                      │
-            ▼ (Reveal popup)       ▼ (Spawn process)
- ┌────────────────────┐  ┌────────────────────┐
- │  C. Command Bar    │  │  D. Python Worker  │
- │      (React)       │  │     (main.py)      │
- └────────────────────┘  └────────────────────┘
-            │                      │
-            ▼ (runTutor IPC)       │ (Reads Context)
-            └──────────────────────┼─────────────┐
-                                   ▼             ▼
-                         ┌───────────┐ ┌───────────┐
-                         │EasyOCR/   │ │pywinauto  │
-                         │WinRT OCR  │ │ UIA Tree  │
-                         └───────────┘ └───────────┘
-                                   │             │
-                                   ▼             ▼
-                         ┌─────────────────────────┐
-                         │   E. LLM Model Router   │
-                         │     (Ollama / Groq)     │
-                         └─────────────────────────┘
-                                       │
-                                       ▼ (Post-processing)
-                         ┌─────────────────────────┐
-                         │ F. Step Post-Processor   │
-                         │  attach_matches()        │
-                         │  skip_navigation_steps() │
-                         │  fill_search_targets()   │
-                         │  slice to [:1]           │
-                         └─────────────────────────┘
-                                       │
-                                       ▼ (JSON Stdout)
-                          ┌────────────────────────┐
-                          │  B. Tauri App Shell    │
-                          └────────────────────────┘
+             │                      │
+             ▼ (Reveal popup)       ▼ (Spawn process)
+  ┌────────────────────┐  ┌────────────────────┐
+  │  C. Command Bar    │  │  D. Python Worker  │
+  │      (React)       │  │     (main.py)      │
+  └────────────────────┘  └────────────────────┘
+             │                      │
+             ▼ (runTutor IPC)       │ (Reads Context)
+             └──────────────────────┼─────────────┐
+                                    ▼             ▼
+                          ┌───────────┐ ┌───────────┐
+                          │EasyOCR/   │ │pywinauto  │
+                          │WinRT OCR  │ │ UIA Tree  │
+                          └───────────┘ └───────────┘
+                                    │             │
+                                    ▼             ▼
+                          ┌─────────────────────────┐
+                          │   E. LLM Model Router   │
+                          │     (Ollama / Groq)     │
+                          └─────────────────────────┘
                                         │
-                                        ▼ (blinky://guidance)
-                          ┌────────────────────────┐
-                          │  G. Overlay Canvas     │
-                          │        (React)         │
-                          └────────────────────────┘
+                                        ▼ (Post-processing)
+                          ┌─────────────────────────┐
+                          │ F. Step Post-Processor   │
+                          │  attach_matches()        │
+                          │  skip_navigation_steps() │
+                          │  fill_search_targets()   │
+                          │  slice to [:1]           │
+                          └─────────────────────────┘
                                         │
-                                        ▼ (Draw Pulse)
-                                  User Desktop
+                                        ▼ (JSON Stdout)
+                           ┌────────────────────────┐
+                           │  B. Tauri App Shell    │
+                           └────────────────────────┘
+                                         │
+                                         ▼ (blinky://guidance)
+                           ┌────────────────────────┐
+                           │  G. Overlay Canvas     │
+                           │        (React)         │
+                           └────────────────────────┘
+                                         │
+                                         ▼ (Draw Pulse)
+                                   User Desktop
 ```
 
 ---
 
 ## 2. Request Lifecycle Sequence
 
-The sequence diagram below traces the end-to-end flow of a single tutor request, showing how coordinates are preserved across process borders.
+The sequence diagram below traces the end-to-end flow of a single tutor request, showing how coordinates are preserved across process boundaries.
 
 ```text
   ┌──────────────────────────────────────────────────┐
   │ 1. USER: Enters prompt in Command Bar            │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 2. Command Bar: Sends run_tutor IPC call         │
   │    with optional workflow progress and           │
   │    previous_question for continuations           │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 3. Tauri Host: Sets WDA_EXCLUDEFROMCAPTURE on    │
   │    command + overlay windows (flicker-free)      │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 4. Tauri Host: Spawns Python Worker              │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 5. Python Worker: Resolves target window PID     │
   │    BEFORE any screen capture                     │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 6. Python Worker: Captures screen via dxcam,     │
   │    prints __BLINKY_CAPTURED__ marker to stdout   │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 7. Tauri Host: Reads __BLINKY_CAPTURED__,        │
   │    restores WDA_NONE on both windows             │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 8. Python Worker: Runs preflight classifier      │
   │    (chat vs screen, continuation detection)      │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 9. Python Worker: Runs WinRT/EasyOCR + UIA       │
   │    (re-resolves fresh COM element by PID)        │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 10. Python Worker: Scales UIA coords from screen │
   │     space → screenshot space, merges with OCR    │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 11. Python Worker: Queries Ollama / Groq         │
   │     (single-step mode, max 350 output tokens)    │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
-  │ 12. Python Worker: Post-processing pipeline:     │
-  │     a. attach_matches() — fuzzy match targets    │
-  │     b. skip_navigation_steps() — skip redundant  │
-  │     c. fill_search_targets() — auto-attach       │
-  │        visible search inputs to empty targets    │
-  │     d. slice to steps[:1] — one step only        │
+  │ 12. Python Worker: Post-processing pipeline      │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 13. Tauri Host: Receives result & emits          │
   │     guidance payload overlay event               │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 14. Overlay: Scales bounds & renders the single  │
-  │     matched Action Guide highlight (full-width   │
-  │     for input controls, capped for other items)  │
+  │     matched Action Guide highlight               │
   └──────────────────────────────────────────────────┘
-                        │
-                        ▼
+                         │
+                         ▼
   ┌──────────────────────────────────────────────────┐
   │ 15. Tauri Host: Mouse hook catches highlighted   │
   │     clicks, records progress, and reruns with    │
@@ -175,38 +169,36 @@ The sequence diagram below traces the end-to-end flow of a single tutor request,
 ## 3. Core Component Reference
 
 ### 3.1 Native Host Shell (`src-tauri/`)
-* **`src-tauri/src/lib.rs`**: Main entryway. Registers Tauri commands, builds system tray context, and sets up window controls. It registers global shortcut hooks (`Ctrl + Shift + Enter` or `Ctrl + Shift + Space`) and spawns a background OS thread for mouse click monitoring.
+* **[lib.rs](file:///c:/projects/Jarvis/src-tauri/src/lib.rs)**: Main entryway. Registers Tauri commands, builds system tray context, and sets up window controls. It registers global shortcut hooks (`Ctrl + Shift + Enter` or `Ctrl + Shift + Space`) and spawns a background OS thread for mouse click monitoring.
 * **Flicker-Free Capture Exclusion**: Before spawning the Python worker, Rust sets `WDA_EXCLUDEFROMCAPTURE` (display affinity `0x00000011`) on both the command bar and overlay windows. This hides them from DXGI/DWM captures while keeping them fully visible and interactive. When the Python worker prints `__BLINKY_CAPTURED__`, Rust immediately restores `WDA_NONE` (`0x00000000`).
-* **`tauri.conf.json`**: Window configuration. Configures the frameless command bar, transparency keys, and sets the overlay window to native full-screen.
+* **[tauri.conf.json](file:///c:/projects/Jarvis/src-tauri/tauri.conf.json)**: Window configuration. Configures the frameless command bar, transparency keys, and sets the overlay window to native full-screen.
 
 ### 3.2 Frontend GUI (`frontend/src/`)
-* **Vite Multi-route Entry (`main.tsx`)**: Inspects `window.location.pathname` to branch rendering into three routes dynamically:
+* **[main.tsx](file:///c:/projects/Jarvis/frontend/src/main.tsx)**: Vite Multi-route Entry. Inspects `window.location.pathname` to branch rendering into three routes dynamically:
   * `/command` → `CommandBar.tsx` (command popup).
   * `/overlay` → `Overlay.tsx` (full-screen transparent highlight map).
   * `/` → `App.tsx` (tutor window container).
-* **Command Bar Controller (`CommandBar.tsx`)**: Manages textarea size dynamically via `ResizeObserver`, calls `resizeCommandWindow` Tauri command to prevent layout clipping, and drives the settings pane. **No background polling** — the tutor only runs when the user submits a query or clicks a highlighted target.
-* **Overlay Canvas (`Overlay.tsx`)**: Scales coordinates from screenshot space to overlay CSS pixels. Renders only the single current Action Guide step. For input controls (Edit, TextBox, ComboBox), bypasses width capping and renders a full-width highlight frame around the entire input field. Emits completed step metadata on highlighted clicks.
+* **[CommandBar.tsx](file:///c:/projects/Jarvis/frontend/src/CommandBar.tsx)**: Manages textarea size dynamically via `ResizeObserver`, calls `resizeCommandWindow` Tauri command to prevent layout clipping, and drives the settings pane. **No background polling** — the tutor only runs when the user submits a query or clicks a highlighted target.
+* **[Overlay.tsx](file:///c:/projects/Jarvis/frontend/src/Overlay.tsx)**: Scales coordinates from screenshot space to overlay CSS pixels. Renders only the single current Action Guide step. For input controls (Edit, TextBox, ComboBox), bypasses width capping and renders a full-width highlight frame around the entire input field. Emits completed step metadata on highlighted clicks. See the [Coordinate Scaling Guide](file:///c:/projects/Jarvis/ai/coordinate_scaling.md) for full details.
 
 ### 3.3 Python Engine (`python/`)
-* **`main.py`**: Orchestrates the full pipeline. Key features:
-  * **Preflight classifier** with continuation detection (`is_continuation`).
-  * **PID-based window locking** before OCR.
-  * **Capture marker** (`__BLINKY_CAPTURED__`) for flicker-free window restoration.
-  * **UIA coordinate normalisation** from physical screen space to screenshot space.
-  * **Blinky UI filtering** — filters OCR items matching Blinky's own UI elements.
-  * **Post-processing pipeline**: `attach_matches()` → `skip_completed_navigation_steps()` → `_fill_empty_search_targets()` → `steps[:1]`.
-* **`ai/prompt.py`**: Formats screen context into compact string representation. Key rules:
-  * **Single-step enforcement**: Exactly 1 step per response.
-  * **Search-bar awareness**: If a search/filter input is already visible, skip the panel-opening step entirely.
-  * **Visible search target_text**: Must use the exact search placeholder text (e.g. `"Search Extensions in Marketplace"`) as `target_text`.
-* **`ai/client.py`**: Routes requests to `ollama_client.py` or `groq_client.py` based on `BLINKY_AI_PROVIDER`.
-* **`ai/ollama_client.py`**: Local Ollama inference with `num_predict: 350`, retry logic, and 120s timeout.
-* **`ai/groq_client.py`**: Cloud Groq Vision inference with `max_tokens: 350` and configurable timeout.
-* **`capture/screen.py`**: Captures via `dxcam` (falling back to PIL `ImageGrab`). Records both physical screen resolution and post-thumbnail dimensions.
-* **`ocr/extract.py`**: OCR hub. Tries Windows WinRT OCR first, falling back to PyTorch-powered local `EasyOCR`.
-* **`utils/matching.py`**: Fuzzy matching with exact match bonus, interactive control bonuses, sidebar context bonuses, and input control preference for search/type instructions.
-* **`utils/uia.py`**: Queries UIA tree via `pywinauto`. Accepts `target_pid` for fresh COM element resolution. Returns screen-absolute coordinates.
-* **`utils/window.py`**: Z-order window scanner with `target_pid` support and Blinky exclusion.
+* **[main.py](file:///c:/projects/Jarvis/python/main.py)**: Orchestrates the full pipeline. Key features:
+  * Preflight classifier with continuation detection (`is_continuation`).
+  * PID-based window locking before OCR.
+  * Capture marker (`__BLINKY_CAPTURED__`) for flicker-free window restoration.
+  * UIA coordinate normalisation from physical screen space to screenshot space.
+  * Blinky UI filtering — filters OCR items matching Blinky's own UI elements.
+  * Post-processing pipeline.
+* **[prompt.py](file:///c:/projects/Jarvis/python/ai/prompt.py)**: Formats screen context into compact string representation. Key rules:
+  * Single-step enforcement: Exactly 1 step per response.
+  * Search-bar awareness: If a search/filter input is already visible, skip the panel-opening step entirely.
+  * Visible search target_text: Must use the exact search placeholder text (e.g. `"Search Extensions in Marketplace"`) as `target_text`.
+* **[client.py](file:///c:/projects/Jarvis/python/ai/client.py)**: Routes requests to `ollama_client.py` or `groq_client.py` based on `BLINKY_AI_PROVIDER`. See the [AI Inference Guide](file:///c:/projects/Jarvis/ai/ai_inference.md) for detailed descriptions.
+* **[screen.py](file:///c:/projects/Jarvis/python/capture/screen.py)**: Captures via `dxcam` (falling back to PIL `ImageGrab`). Records both physical screen resolution and post-thumbnail dimensions.
+* **[extract.py](file:///c:/projects/Jarvis/python/ocr/extract.py)**: OCR hub. Tries Windows WinRT OCR first, falling back to PyTorch-powered local `EasyOCR`.
+* **[matching.py](file:///c:/projects/Jarvis/python/utils/matching.py)**: Fuzzy matching with exact match bonus, interactive control bonuses, sidebar context bonuses, and input control preference for search/type instructions. See the [Target Matching Heuristics Guide](file:///c:/projects/Jarvis/ai/matching_heuristics.md) for matching details.
+* **[uia.py](file:///c:/projects/Jarvis/python/utils/uia.py)**: Queries UIA tree via `pywinauto`. Accepts `target_pid` for fresh COM element resolution. Returns screen-absolute coordinates.
+* **[window.py](file:///c:/projects/Jarvis/python/utils/window.py)**: Z-order window scanner with `target_pid` support and Blinky exclusion.
 
 ---
 
@@ -273,8 +265,6 @@ The Python worker must output a single, valid JSON object to standard output on 
 }
 ```
 
-> **Note**: `steps` always contains **at most 1 step** (enforced by the backend). `screenshot.width`/`height` reflect post-thumbnail dimensions, not the physical screen resolution.
-
 If an unhandled exception occurs, the worker prints an error payload and exits with code 1:
 
 ```json
@@ -328,109 +318,22 @@ If an unhandled exception occurs, the worker prints an error payload and exits w
   ```
 * **Action**: Records completed workflow progress. Click-only completions rerun `run_tutor` with the progress payload after a short delay, then wait for the fresh screen read before displaying the next step. Text-entry/search highlight clicks are treated as focus actions only.
 
-### 4.4 Chat, Guidance, and Voice Readback Contract
-
-* Casual chat requests use `build_preflight_prompt()` followed by `build_chat_prompt()` and return a direct summary with `steps: []`.
-* The preflight classifier also detects **continuations** (`is_continuation`) — follow-ups like "what next?" or "done" that refer to the previous active goal rather than starting a new task.
-* Screen-bound workflow requests use `build_prompt()` with visible OCR/UIA items and optional `progress` context.
-* The AI generates exactly **1 step** per request. The backend enforces this with both prompt rules and programmatic `steps[:1]` slicing.
-* `target_text` must contain the **exact visible text** of the control to highlight. For search inputs, this is the placeholder text (e.g. `"Search Extensions in Marketplace"`). The backend fallback `_fill_empty_search_targets()` auto-attaches visible search inputs when the AI leaves `target_text` empty.
-* Voice readback speaks the current guide step only when the workflow began from voice input. Typed workflows remain silent during highlight-click continuations.
-
 ---
 
-## 5. Architectural Trade-offs & Calculations
+## 5. Architectural Implementation Details
 
-### 5.1 Resolution Normalization and Scale Mapping
+Detailed specifications for coordinate calculations, target resolution, and AI prompting can be found in the dedicated guides below:
+* **[Coordinate Scaling & Normalization Guide](file:///c:/projects/Jarvis/ai/coordinate_scaling.md)**: Physical screen downsampling, UIA bounds normalization, CSS display scaling, and highlight capping rules.
+* **[Target Matching Heuristics Guide](file:///c:/projects/Jarvis/ai/matching_heuristics.md)**: Weighted fuzzy matching score calculations, interactive bonuses, grid deduplication matrix, and post-processing steps pipeline.
+* **[AI Inference Guide](file:///c:/projects/Jarvis/ai/ai_inference.md)**: Preflight classifier, conversation logic, compact prompting, and Ollama/Groq provider details.
+* **[Sarvam AI Voice Integration Guide](file:///c:/projects/Jarvis/ai/sarvam.md)**: Text-to-speech payload schemas, speech-to-text multipart transcript processing, voice-first constraint logic, settings hooks, and voice readback state.
 
-#### Screenshot Scaling
-Screens can be captured at any physical resolution (e.g. 2560×1600, 4K). To maintain reliable OCR speed and lower model prompt sizes, `capture/screen.py` downsamples screenshots using Lanczos resizing to fit within:
-$$\text{Max Resolution} = 1920 \times 1080 \text{ px (preserving aspect ratio)}$$
-
-The actual output dimensions depend on the screen's aspect ratio. For example, a 2560×1600 (16:10) screen produces a 1728×1080 screenshot.
-
-`capture_screen()` returns a `Screenshot` object with both:
-* `width` / `height` — the post-thumbnail screenshot dimensions.
-* `screen_width` / `screen_height` — the original capture dimensions (physical screen).
-
-#### UIA Coordinate Normalisation
-Windows UI Automation returns element bounding rectangles in **physical screen-absolute pixels** — the same coordinate space as `screen_width × screen_height`. OCR items, however, are already in **screenshot space** (`width × height`).
-
-To put both sources in the same space before the overlay applies its scale transform, `main.py` normalises UIA coordinates:
-
-$$s_x = \frac{\text{screenshot.width}}{\text{screenshot.screen\_width}}, \quad s_y = \frac{\text{screenshot.height}}{\text{screenshot.screen\_height}}$$
-
-$$x_{\text{ss}} = \lfloor x_{\text{uia}} \times s_x \rceil, \quad y_{\text{ss}} = \lfloor y_{\text{uia}} \times s_y \rceil$$
-
-For a 2560×1600 screen producing a 1728×1080 screenshot: $s_x = s_y = 0.675$.
-
-#### Overlay Display Scaling
-When `/overlay` renders, it maps screenshot-space coordinates to browser viewport pixels:
-
-$$\text{scale}_x = \frac{\text{window.innerWidth}}{\text{screenshot.width}}, \quad \text{scale}_y = \frac{\text{window.innerHeight}}{\text{screenshot.height}}$$
-
-$$\text{frame.left} = \text{round}(x_{\text{ss}} \times \text{scale}_x), \quad \text{frame.top} = \text{round}(y_{\text{ss}} \times \text{scale}_y)$$
-
-#### Highlight Box Sizing
-The overlay uses dynamic size caps and input-specific bypasses:
-
-```typescript
-// Standard elements: capped sizes
-const MAX_BOX_WIDTH = isIcon ? 100 : 140;
-const MAX_BOX_HEIGHT = isIcon ? 40 : 44;
-const MIN_BOX_SIZE = 36;
-
-// Input controls (Edit, TextBox, ComboBox): full-width bypass
-if (isInput) {
-  displayWidth = rawWidth;   // no cap
-  displayLeft = rawLeft;     // no centering shift
-}
-```
-
-### 5.2 Window Locking & COM Staleness
-
-OCR takes approximately 15 seconds. If `get_target_window_element()` is called after OCR, it may return a different app. Additionally, caching a pywinauto `UIAWrapper` COM object across the OCR wait causes it to become stale.
+### 5.1 Window Locking & COM Staleness
+OCR operations can take several seconds. If `get_target_window_element()` is called after OCR, it may return a different app. Additionally, caching a pywinauto `UIAWrapper` COM object across the OCR wait causes it to become stale.
 
 **Solution**: Extract the target window's **PID** before OCR starts. Both `get_active_window()` and `get_visible_ui_text()` accept `target_pid`. When UIA runs (after OCR), it re-scans the Z-order filtered to that PID, acquiring a **fresh COM element** for the correct app.
 
-### 5.3 Merge and Deduplication Matrix
-To coordinate UIA items and OCR text boxes, `main.py` runs a grid deduplication helper:
-1. Inputs are rounded into coarse buckets by dividing coordinates by $8$ pixels.
-2. UIA items are placed first (higher priority). If a UIA item matches an OCR item on the same row, the UIA bounds are overridden with the precise OCR bounds.
-3. **Input control calibration**: OCR items that fall inside a UIA input control's bounding box are expanded to the full input control dimensions and inherit its `control_type`.
-4. If two elements have identical text in the same bucket, the first entry (UIA) wins.
-
-### 5.4 Step-to-Target Matching Heuristics
-The LLM returns target labels in plain text. The matcher (`python/utils/matching.py`) finds the best screen element using a weighted scoring formula:
-
-1. **Exact Match**: If normalized target equals normalized text, `score = 1.0`.
-2. **Substring Match**: If target is a substring of the text (or vice versa), `score = 0.86`.
-3. **Fuzzy Match**: Calls `difflib.SequenceMatcher.ratio()`. If ratio is $< 0.65$, it is ignored.
-4. **Weighted Score Formula**:
-   $$\text{Score} = (\text{Similarity} \times 0.94) + (\text{OCR Confidence} \times 0.06) + \sum \text{Bonuses}$$
-   
-   Bonuses include:
-   * **OCR source**: $+0.02$
-   * **Size**: Up to $+0.05$ based on element area
-   * **Sidebar context**: $+0.20$ if instruction mentions "sidebar"/"left" and element is in sidebar region
-   * **Interactive control**: $+0.24$ for UIA buttons/tabs/menus when instruction asks for an interactive element
-   * **Input control preference**: $+0.30$ when instruction is a type/search action and element is an input control
-   * **Exact match bonus**: $+0.30$ for case-insensitive exact string match
-   * **Blinky source penalty**: $-0.40$ for elements from Blinky's own UI
-
-   Minimum acceptance threshold: **`Score >= 0.52`**.
-
-### 5.5 Step Post-Processing Pipeline
-
-After the AI model returns its response, the backend applies a four-stage pipeline:
-
-1. **`attach_matches(steps, visible_items)`**: Fuzzy-matches each step's `target_text` to the best visible element.
-2. **`skip_completed_navigation_steps(steps)`**: If step 1 is a navigation action (click tab/sidebar/menu) AND step 2's target is already visible on screen, skips step 1.
-3. **`_fill_empty_search_targets(steps, visible_items)`**: If a step has a search/type instruction but empty `target_text`, auto-finds the first visible search/filter/find input and attaches it.
-4. **`steps[:1]`**: Programmatically slices to at most 1 step for the frontend.
-
-### 5.6 Flicker-Free Capture Exclusion
-
+### 5.2 Flicker-Free Capture Exclusion
 Instead of hiding/showing windows during capture (which causes flicker), Rust uses the Windows Display Affinity API:
 
 ```text

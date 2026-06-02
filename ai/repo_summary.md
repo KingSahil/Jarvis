@@ -2,18 +2,22 @@
 
 Welcome to the AI integration and developer documentation directory for **Blinky**. 
 
-This directory contains comprehensive guides designed to ramp up human developers quickly and instruct offline AI coding agents on the system architecture, API interfaces, coordinate mapping formulas, and post-processing pipelines used throughout the codebase.
+This directory contains comprehensive guides designed to ramp up human developers quickly and instruct offline AI coding agents on the system architecture, API interfaces, coordinate mapping formulas, matching heuristics, and voice integrations used throughout the codebase.
 
 ---
 
 ## 📖 Available Guides
 
-For a detailed walkthrough of the codebase, select one of the core guides below:
+Select one of the specialized guides below to inspect a component or concept:
 
 | Guide | Description | Target Audience |
 | :--- | :--- | :--- |
-| 🏗️ **[System Architecture](file:///c:/projects/Jarvis/ai/architecture.md)** | Multi-process models, high-level flowcharts, sequence diagrams, IPC protocols, coordinate scaling mechanics, and post-processing pipelines. | Architects, System Integrators, AI Agents |
-| 📝 **[Per-File Specifications](file:///c:/projects/Jarvis/ai/detailed_summaries.md)** | Detailed function signatures, mathematical formulas, coordinate scaling bounds, bucketing, search scoring algorithms, and step post-processors. | Developers, AI Agents |
+| 🏗️ **[System Architecture](file:///c:/projects/Jarvis/ai/architecture.md)** | Multi-process models, high-level system flows, sequence diagrams, and IPC protocols. | Architects, System Integrators, AI Agents |
+| 📐 **[Coordinate Scaling & Normalization](file:///c:/projects/Jarvis/ai/coordinate_scaling.md)** | Calculations mapping physical screens to downsampled screenshots and web view CSS layout coordinates. | Developers, QA, AI Agents |
+| 🎯 **[Matching Heuristics & Deduplication](file:///c:/projects/Jarvis/ai/matching_heuristics.md)** | Fuzzy target matching algorithms, context scoring bonuses, coordinate grids, and steps post-processing. | Developers, AI Agents |
+| 🧠 **[AI Inference & Prompts](file:///c:/projects/Jarvis/ai/ai_inference.md)** | Chat engine prompts, preflight classification, continuation logic, single-step enforcement, and Ollama/Groq configs. | Prompt Engineers, AI Agents |
+| 🗣️ **[Sarvam AI Voice Integration](file:///c:/projects/Jarvis/ai/sarvam.md)** | Bulbul (TTS) and Saaras (STT) payload formats, authentication headers, error messages, and frontend hooks. | Audio Engineers, AI Agents |
+| 📝 **[Per-File API Reference](file:///c:/projects/Jarvis/ai/detailed_summaries.md)** | Detailed function signatures, classes, arguments, and module-level responsibilities. | Developers, AI Agents |
 | 🗂️ **[Files Index](file:///c:/projects/Jarvis/ai/files_index.json)** | Machine-readable JSON listing of core codebase assets and their functional descriptions. | AI Agents, Automations |
 
 ---
@@ -57,16 +61,3 @@ bun run dev
 ```
 
 *For details on configuring `.env` variables and custom shortcut hotkeys, please refer to the [System Architecture Guide](file:///c:/projects/Jarvis/ai/architecture.md#6-environment--settings-variables).*
-
-## Current AI Guidance Behavior
-
-Blinky operates in a **single-step reactive mode**:
-
-* **Preflight Classification**: Before any screen capture, a text-only classifier decides whether the query needs screen analysis. It also detects continuations (follow-ups to a previous active goal) vs. new tasks using `is_continuation`.
-* **Single-Step Generation**: The AI prompt enforces exactly **1 step** per response. Token output is capped at 350 to minimise local Ollama inference time. The backend also programmatically slices the steps list to `[:1]` as a safety net.
-* **No Background Polling**: Blinky is fully reactive — it only captures the screen and queries the model when the user submits a question or clicks a highlighted target. There is no background polling loop.
-* **Flicker-Free Capture**: The Rust backend uses `WDA_EXCLUDEFROMCAPTURE` display affinity to hide Blinky windows from screenshots while keeping them fully visible and interactive on the user's desktop.
-* **Search Bar Fallback**: If the AI returns a search/type instruction with empty `target_text`, the backend auto-detects and attaches the first visible search/filter input control so the green pulsing highlight always appears on the search bar.
-* **Navigation Step Skipping**: If the AI's first step is a redundant navigation action (e.g. "click Extensions tab") but the target search bar is already visible on screen, the step is automatically skipped.
-* **Input Field Highlighting**: When a matched element is an input control (Edit, TextBox, ComboBox), the overlay renders a full-width highlight instead of character-count-based width capping.
-* Voice readback speaks the current Action Guide step only for workflows that started from voice input. Typed workflows stay silent on highlight-click continuations.
