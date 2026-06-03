@@ -1101,6 +1101,11 @@ h3 {
   animation: pulse 1.5s ease-out infinite;
 }
 
+.target-frame-compact .target-pulse {
+  inset: -2px;
+  border-radius: 9px;
+}
+
 @keyframes borderPulse {
   0%, 100% {
     border-color: #a7ff7a;

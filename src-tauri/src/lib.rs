@@ -439,6 +439,24 @@ fn configure_overlay_passthrough(window: &WebviewWindow) {
             WS_EX_TRANSPARENT,
         };
 
+        let monitor = window
+            .current_monitor()
+            .ok()
+            .flatten()
+            .or_else(|| window.primary_monitor().ok().flatten());
+        if let Some(monitor) = monitor {
+            let size = monitor.size();
+            let position = monitor.position();
+            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                width: size.width,
+                height: size.height,
+            }));
+            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                x: position.x,
+                y: position.y,
+            }));
+        }
+
         if let Ok(hwnd) = window.hwnd() {
             unsafe {
                 let hwnd = hwnd.0 as HWND;
@@ -453,7 +471,7 @@ fn configure_overlay_passthrough(window: &WebviewWindow) {
     }
 }
 
-fn set_window_capture_exclusion(_window: &WebviewWindow, _exclude: bool) {
+fn set_window_capture_exclusion(window: &WebviewWindow, exclude: bool) {
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::Foundation::HWND;
