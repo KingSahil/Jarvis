@@ -1,22 +1,21 @@
 import { emit, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { ArrowUp, Loader2, Minus, Sparkles, X, Settings, Check, Mic, Volume2, Globe } from 'lucide-react';
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { ArrowUp, Bot, Loader2, Minus, Sparkles, X, Settings, Check, Mic, Volume2, Globe } from 'lucide-react';
+import { AnchorHTMLAttributes, FormEvent, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { runAutopilotLoop } from './lib/autopilot';
 import {
   getCurrentGuideSteps,
   getDisplaySteps,
   getHighlightSteps,
-  getWorkflowContinuationReadback,
   mergeGuideHistory,
   shouldCompleteStepOnHighlightClick,
   shouldShowSummaryBubble,
 } from './lib/guidance';
-import { runAgentQuery, runTutor, showOverlay, hideOverlay, resizeCommandWindow, getSettings, saveSettings, resizeAndMoveCommandWindow, clickScreenPoint } from './lib/tauri';
+import { runTutor, showOverlay, hideOverlay, resizeCommandWindow, getSettings, saveSettings, resizeAndMoveCommandWindow, clickScreenPoint, openUrl } from './lib/tauri';
+import { linkCitationMarkers } from './lib/citations';
 import { buildAudioDataUrl, buildSarvamTtsPayload, buildSpeechContent, getSarvamErrorMessage } from './lib/tts';
 import type { TutorConversationMessage, TutorProgress, TutorResult } from './lib/types';
-import { runWebActionThenScreenGuidance } from './lib/webGuidance';
 
 interface TargetClickedPayload {
   step?: number;
@@ -29,10 +28,45 @@ interface TutorRunOptions {
   preserveStepsDuringRun?: boolean;
 }
 
+function getLinkText(children: AnchorHTMLAttributes<HTMLAnchorElement>['children']): string {
+  if (typeof children === 'string' || typeof children === 'number') {
+    return String(children);
+  }
+
+  if (Array.isArray(children)) {
+    return children.map(getLinkText).join('');
+  }
+
+  return '';
+}
+
+function ExternalMarkdownLink({ href, children }: AnchorHTMLAttributes<HTMLAnchorElement>) {
+  const linkText = getLinkText(children);
+  const isCitation = /^\d+$/.test(linkText);
+
+  return (
+    <a
+      href={href}
+      className={isCitation ? 'citation-link' : undefined}
+      title={isCitation ? `Open source ${linkText}` : undefined}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (href) {
+          void openUrl(href);
+        }
+      }}
+    >
+      {isCitation ? `[${linkText}]` : children}
+    </a>
+  );
+}
+
 export function CommandBar() {
   const [question, setQuestion] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [agentModeEnabled, setAgentModeEnabled] = useState(false);
   const defaultStatus = 'Ask anything on your screen';
 
   const [isResizing, setIsResizing] = useState(false);
@@ -110,6 +144,19 @@ export function CommandBar() {
   const currentGuideStepsRef = useRef<any[]>([]);
   const workflowStartedWithReadbackRef = useRef(false);
   const conversationHistoryRef = useRef<TutorConversationMessage[]>([]);
+
+  const rememberCompletedStep = (targetText?: string, instruction?: string) => {
+    const cleanTarget = targetText?.trim();
+    const cleanInstruction = instruction?.trim();
+
+    if (cleanTarget && !completedTargetsRef.current.includes(cleanTarget)) {
+      completedTargetsRef.current = [...completedTargetsRef.current, cleanTarget];
+    }
+
+    if (cleanInstruction && !completedInstructionsRef.current.includes(cleanInstruction)) {
+      completedInstructionsRef.current = [...completedInstructionsRef.current, cleanInstruction];
+    }
+  };
 
   const stopSpeaking = () => {
     if (currentAudioRef.current) {
@@ -348,38 +395,45 @@ export function CommandBar() {
     const currentWindow = getCurrentWindow();
     try {
       let result: TutorResult;
-      if (webSearchEnabled) {
+      if (agentModeEnabled) {
         let firstObservation: TutorResult | null = null;
         const autopilot = await runAutopilotLoop({
-          maxAttempts: 5,
+          maxAttempts: 1,
+          observeAfterAction: false,
           observe: async () => {
             if (!firstObservation) {
-              firstObservation = await runWebActionThenScreenGuidance({
-                query: queryText,
-                previousQuestion,
-                progress: currentProgress(),
-                conversationHistory,
-                runAgentQuery,
-                runTutor,
-              });
+              firstObservation = await runTutor(queryText, previousQuestion, currentProgress(), conversationHistory, false);
               return firstObservation;
             }
-            return runTutor(queryText, previousQuestion, currentProgress(), conversationHistory, true);
+            return runTutor(queryText, previousQuestion, currentProgress(), conversationHistory, false);
           },
-          act: async (point) => {
+          act: async (point, step) => {
             setStatus(`Autopilot clicking (${point.x}, ${point.y})...`);
+            rememberCompletedStep(step.target_text, step.instruction);
             await clickScreenPoint(point.x, point.y);
           },
         });
-        result = autopilot.finalResult;
+        if (autopilot.stopReason === 'single_action') {
+          const completedStep = autopilot.finalResult.steps.find((candidate) => candidate.instruction.trim());
+          const completedLabel = completedStep?.target_text || completedStep?.instruction || 'the selected target';
+          result = {
+            ...autopilot.finalResult,
+            summary: `Clicked ${completedLabel}. Type again when you want the next step.`,
+            steps: [],
+          };
+        } else {
+          result = autopilot.finalResult;
+        }
       } else {
         result = await runTutor(queryText, previousQuestion, currentProgress(), conversationHistory, webSearchEnabled);
       }
       const isContinuation = !!result.is_continuation;
 
       if (!isContinuation) {
-        completedTargetsRef.current = [];
-        completedInstructionsRef.current = [];
+        if (!agentModeEnabled) {
+          completedTargetsRef.current = [];
+          completedInstructionsRef.current = [];
+        }
         currentGuideStepsRef.current = [];
         workflowStartedWithReadbackRef.current = shouldSpeakAfter;
         setSteps([]);
@@ -538,18 +592,8 @@ export function CommandBar() {
         void hideOverlay();
         return;
       }
-      if (targetText && !completedTargetsRef.current.includes(targetText)) {
-        completedTargetsRef.current = [...completedTargetsRef.current, targetText];
-      }
-      if (instruction && !completedInstructionsRef.current.includes(instruction)) {
-        completedInstructionsRef.current = [...completedInstructionsRef.current, instruction];
-      }
+      rememberCompletedStep(targetText, instruction);
       void hideOverlay();
-      window.setTimeout(() => {
-        void executeTutor(query, getWorkflowContinuationReadback(workflowStartedWithReadbackRef.current), {
-          preserveStepsDuringRun: true,
-        });
-      }, 450);
     });
     return () => {
       unlisten.then((dispose) => dispose());
@@ -574,19 +618,9 @@ export function CommandBar() {
         const targetText = activeStep.target_text?.trim();
         const instruction = activeStep.instruction?.trim();
 
-        if (targetText && !completedTargetsRef.current.includes(targetText)) {
-          completedTargetsRef.current = [...completedTargetsRef.current, targetText];
-        }
-        if (instruction && !completedInstructionsRef.current.includes(instruction)) {
-          completedInstructionsRef.current = [...completedInstructionsRef.current, instruction];
-        }
+        rememberCompletedStep(targetText, instruction);
 
         void hideOverlay();
-        window.setTimeout(() => {
-          void executeTutor(query, getWorkflowContinuationReadback(workflowStartedWithReadbackRef.current), {
-            preserveStepsDuringRun: true,
-          });
-        }, 450);
       }
     });
 
@@ -842,12 +876,32 @@ export function CommandBar() {
               className={`command-websearch-btn ${webSearchEnabled ? 'active' : ''}`}
               onClick={(e) => {
                 e.stopPropagation();
-                setWebSearchEnabled(!webSearchEnabled);
+                const nextEnabled = !webSearchEnabled;
+                setWebSearchEnabled(nextEnabled);
+                if (nextEnabled) {
+                  setAgentModeEnabled(false);
+                }
               }}
               disabled={isRunning || isTranscribing}
               title="Toggle Web Search"
             >
               <Globe size={16} />
+            </button>
+            <button
+              type="button"
+              className={`command-agent-btn ${agentModeEnabled ? 'active' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                const nextEnabled = !agentModeEnabled;
+                setAgentModeEnabled(nextEnabled);
+                if (nextEnabled) {
+                  setWebSearchEnabled(false);
+                }
+              }}
+              disabled={isRunning || isTranscribing}
+              title="Toggle Agent Automation"
+            >
+              <Bot size={16} />
             </button>
             <button
               type="button"
@@ -872,12 +926,12 @@ export function CommandBar() {
             </button>
           </div>
 
-          {webSearchEnabled && isRunning && (
+          {(webSearchEnabled || agentModeEnabled) && isRunning && (
             <div className="command-progress-bar-container">
               <div className="command-progress-bar-fill" />
               <div className="command-progress-status-text">
-                <Globe size={12} className="spin" />
-                <span>Web Intelligence Search Active...</span>
+                {agentModeEnabled ? <Bot size={12} className="spin" /> : <Globe size={12} className="spin" />}
+                <span>{agentModeEnabled ? 'Agent Automation Active...' : 'Web Intelligence Search Active...'}</span>
               </div>
             </div>
           )}
@@ -888,7 +942,9 @@ export function CommandBar() {
                 <div className="command-summary-bubble">
                   <Sparkles size={14} className="summary-sparkle" />
                   <div className="command-summary-text-container">
-                    <span className="command-status"><ReactMarkdown>{status}</ReactMarkdown></span>
+                    <span className="command-status">
+                      <ReactMarkdown components={{ a: ExternalMarkdownLink }}>{linkCitationMarkers(status)}</ReactMarkdown>
+                    </span>
                     {steps.length > 0 && sarvamApiKey && (
                       <button
                         type="button"

@@ -10,12 +10,13 @@ export interface AutopilotRunInput {
   observe: () => Promise<TutorResult>;
   act: (point: ScreenPoint, step: TutorStep) => Promise<void>;
   wait?: () => Promise<void>;
+  observeAfterAction?: boolean;
 }
 
 export interface AutopilotRunResult {
   finalResult: TutorResult;
   attempts: number;
-  stopReason: 'complete' | 'unsafe_step' | 'missing_target' | 'unchanged_after_action' | 'max_attempts';
+  stopReason: 'complete' | 'unsafe_step' | 'missing_target' | 'single_action' | 'unchanged_after_action' | 'max_attempts';
 }
 
 const SAFE_ACTION_HINTS = ['click', 'open', 'select', 'choose', 'go to'];
@@ -26,6 +27,7 @@ export async function runAutopilotLoop({
   observe,
   act,
   wait = defaultWait,
+  observeAfterAction = true,
 }: AutopilotRunInput): Promise<AutopilotRunResult> {
   let current = await observe();
   let attempts = 0;
@@ -48,6 +50,11 @@ export async function runAutopilotLoop({
     const point = getPhysicalClickablePoint(nextStep, current);
     await act(point, nextStep);
     attempts += 1;
+
+    if (!observeAfterAction) {
+      return { finalResult: current, attempts, stopReason: 'single_action' };
+    }
+
     await wait();
 
     const after = await observe();

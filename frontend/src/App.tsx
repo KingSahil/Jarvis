@@ -3,6 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ArrowUp, Loader2, Minus, Sparkles, X, Settings, Check } from 'lucide-react';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { linkCitationMarkers } from './lib/citations';
 import { runTutor, showOverlay, resizeCommandWindow, getSettings, saveSettings, resizeAndMoveCommandWindow, openUrl } from './lib/tauri';
 
 export function App() {
@@ -457,20 +458,28 @@ export function App() {
                       a: ({ node, href, children, ...props }) => (
                         <a
                           href={href}
+                          className={
+                            /^\d+$/.test(Array.isArray(children) ? children.join('') : String(children || ''))
+                              ? 'citation-link'
+                              : undefined
+                          }
                           {...props}
                           onClick={(e) => {
                             e.preventDefault();
+                            e.stopPropagation();
                             if (href) {
                               void openUrl(href);
                             }
                           }}
                         >
-                          {children}
+                          {/^\d+$/.test(Array.isArray(children) ? children.join('') : String(children || ''))
+                            ? `[${Array.isArray(children) ? children.join('') : String(children || '')}]`
+                            : children}
                         </a>
                       )
                     }}
                   >
-                    {status}
+                    {linkCitationMarkers(status)}
                   </ReactMarkdown>
                 </span>
               </div>

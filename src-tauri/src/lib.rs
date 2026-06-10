@@ -132,6 +132,16 @@ fn click_screen_point(x: i32, y: i32) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("https://") || trimmed.starts_with("http://")) {
+        return Err("Only http and https links can be opened.".to_string());
+    }
+
+    open_url_impl(trimmed)
+}
+
+#[tauri::command]
 fn show_command_bar(app: AppHandle) -> Result<(), String> {
     show_command_window(&app);
     Ok(())
@@ -475,6 +485,35 @@ fn python_executable(root: &PathBuf) -> PathBuf {
     }
 }
 
+fn open_url_impl(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("rundll32");
+        command.arg("url.dll,FileProtocolHandler").arg(url);
+        command
+    };
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg(url);
+        command
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(url);
+        command
+    };
+
+    command
+        .spawn()
+        .map_err(|err| format!("Failed to open link in default browser: {err}"))?;
+
+    Ok(())
+}
+
 fn configure_overlay_passthrough(window: &WebviewWindow) {
     let _ = window.set_ignore_cursor_events(true);
 
@@ -578,6 +617,7 @@ pub fn run() {
             show_overlay,
             hide_overlay,
             click_screen_point,
+            open_url,
             show_command_bar,
             resize_command_window,
             resize_and_move_command_window,

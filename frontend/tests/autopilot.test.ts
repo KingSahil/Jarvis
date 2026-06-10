@@ -133,4 +133,25 @@ describe('runAutopilotLoop', () => {
     expect(output.attempts).toBe(1);
     expect(output.stopReason).toBe('unchanged_after_action');
   });
+
+  test('can stop after one action without observing again', async () => {
+    let observes = 0;
+    const clicked: Array<{ x: number; y: number }> = [];
+
+    const output = await runAutopilotLoop({
+      maxAttempts: 5,
+      observeAfterAction: false,
+      observe: async () => {
+        observes += 1;
+        return result([step('Click Gaming.')]);
+      },
+      act: async (point) => clicked.push(point),
+      wait: async () => {},
+    });
+
+    expect(observes).toBe(1);
+    expect(clicked).toEqual([{ x: 140, y: 220 }]);
+    expect(output.attempts).toBe(1);
+    expect(output.stopReason).toBe('single_action');
+  });
 });

@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Dict, Any, List, Callable
 import httpx
 from wil.planner import QueryPlanner
@@ -9,6 +10,8 @@ from wil.processor import ContentProcessor
 from wil.reasoner import Reasoner
 
 LOGGER = logging.getLogger("blinky.pipeline")
+
+SOURCE_SECTION_RE = re.compile(r"\n+\s*(?:Sources|References):\s*\n[\s\S]*$", re.IGNORECASE)
 
 class WILPipeline:
     def __init__(self, base_url: str = None):
@@ -31,10 +34,32 @@ class WILPipeline:
             text = " ".join(str(source.get("text", "")).split())
             excerpt = text[:280].rstrip()
             if excerpt:
-                lines.append(f"- {title}: {excerpt} ({url})")
+                lines.append(f"- [{self.markdown_link_text(title)}]({url}): {excerpt}")
             else:
-                lines.append(f"- {title}: {url}")
+                lines.append(f"- [{self.markdown_link_text(title)}]({url})")
         return "\n".join(lines)
+
+    def markdown_link_text(self, value: str) -> str:
+        return " ".join(str(value).split()).replace("[", "(").replace("]", ")")
+
+    def append_clickable_sources(self, response: str, sources: List[Dict[str, Any]], limit: int = 5) -> str:
+        links = []
+        seen_urls = set()
+        for source in sources:
+            url = str(source.get("url", "")).strip()
+            if not url.startswith(("http://", "https://")) or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            title = self.markdown_link_text(source.get("title") or url)
+            links.append(f"- [{title}]({url})")
+            if len(links) >= limit:
+                break
+
+        if not links:
+            return response.strip()
+
+        answer = SOURCE_SECTION_RE.sub("", response.strip()).strip()
+        return f"{answer}\n\nSources:\n" + "\n".join(links)
 
     async def check_searxng_online(self) -> bool:
         try:
@@ -108,15 +133,18 @@ class WILPipeline:
         # Phase 4: Processing
         emit_status("processing", "Cleaning and filtering text content...")
         processed = self.processor.process(query, acquired)
+        source_links = processed["sources"] or results
         
         # Phase 5: Reasoning
         emit_status("reasoning", "Synthesizing streamed answer...")
         synthesized = self.reasoner.synthesize(query, processed["context"], on_chunk)
         if synthesized.strip().startswith("[Synthesis Error"):
-            synthesized = self.fallback_summary(query, processed["sources"])
+            synthesized = self.fallback_summary(query, source_links)
+        else:
+            synthesized = self.append_clickable_sources(synthesized, source_links)
         
         return {
             "needs_web_search": True,
             "synthesized_response": synthesized,
-            "sources": processed["sources"]
+            "sources": source_links
         }
