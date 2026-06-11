@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import tempfile
 import unittest
 from unittest.mock import patch
 
 from ai.groq_client import _validate_response as validate_groq_response
 from ai.ollama_client import _validate_response as validate_ollama_response
 from ai.prompt import build_chat_prompt, build_preflight_prompt, build_prompt
-from main import extract_locator_target, resolve_locator_fast_path, run, should_force_screen_context
+from main import (
+    assign_screen_element_refs,
+    extract_locator_target,
+    merge_visible_items,
+    resolve_locator_fast_path,
+    run,
+    should_force_screen_context,
+)
 from utils.matching import attach_matches
 from utils.matching import find_best_match, find_best_match_with_score
+from utils.ui_map_cache import UiMapCache, window_signature
 from utils.uia import _element_text, _readable_metadata_text, _uia_item
 
 
@@ -113,7 +122,7 @@ class GuidanceFlowTests(unittest.TestCase):
 
         self.assertIn("stay in the active app", prompt_lower)
         self.assertIn("do not switch to another app", prompt_lower)
-        self.assertIn("return a short workflow plan", prompt_lower)
+        self.assertIn("return only the immediate next step", prompt_lower)
         self.assertIn("do not repeat completed actions", prompt_lower)
         self.assertNotIn("strictly return a maximum of 1 step", prompt_lower)
 
@@ -160,7 +169,8 @@ class GuidanceFlowTests(unittest.TestCase):
             ],
         )
 
-        self.assertIn('"Visible Button 1" (1200,980,44,44,Button)', prompt)
+        self.assertIn('role=Button name="Visible Button 1" box=(1200,980,44,44)', prompt)
+        self.assertIn('target_ref', prompt)
         self.assertIn("For unlabeled icon-only controls", prompt)
 
     def test_screen_prompt_keeps_interactive_controls_after_many_text_items(self) -> None:
@@ -193,7 +203,136 @@ class GuidanceFlowTests(unittest.TestCase):
             ],
         )
 
-        self.assertIn('"Visible Button 1" (1200,980,44,44,Button)', prompt)
+        self.assertIn('role=Button name="Visible Button 1" box=(1200,980,44,44)', prompt)
+
+    def test_assign_screen_element_refs_adds_stable_refs_and_flags(self) -> None:
+        items = assign_screen_element_refs(
+            [
+                {
+                    "text": "Search Extensions in Marketplace",
+                    "x": 40,
+                    "y": 80,
+                    "width": 300,
+                    "height": 30,
+                    "source": "uia",
+                    "control_type": "Edit",
+                    "automation_id": "search-box",
+                },
+                {
+                    "text": "",
+                    "x": 16,
+                    "y": 170,
+                    "width": 24,
+                    "height": 24,
+                    "source": "uia",
+                    "control_type": "Button",
+                },
+            ]
+        )
+
+        self.assertEqual(items[0]["ref"], "@e1")
+        self.assertEqual(items[0]["automation_id"], "search-box")
+        self.assertTrue(items[0]["input"])
+        self.assertTrue(items[0]["clickable"])
+        self.assertEqual(items[1]["ref"], "@e2")
+        self.assertEqual(items[1]["ai_label"], "Visible Button 1")
+        self.assertTrue(items[1]["clickable"])
+
+    def test_merge_visible_items_deduplicates_overlapping_ocr_and_uia(self) -> None:
+        merged = merge_visible_items(
+            ocr_items=[
+                {
+                    "text": "Install",
+                    "x": 302,
+                    "y": 181,
+                    "width": 42,
+                    "height": 17,
+                    "source": "ocr",
+                    "control_type": "Text",
+                }
+            ],
+            uia_items=[
+                {
+                    "text": "Install",
+                    "x": 300,
+                    "y": 180,
+                    "width": 80,
+                    "height": 28,
+                    "source": "uia",
+                    "control_type": "Button",
+                }
+            ],
+        )
+
+        install_items = [item for item in merged if item.get("text") == "Install"]
+        self.assertEqual(len(install_items), 1)
+        self.assertEqual(install_items[0]["control_type"], "Button")
+
+    def test_attach_matches_resolves_target_ref_before_fuzzy_text(self) -> None:
+        items = assign_screen_element_refs(
+            [
+                {
+                    "text": "Install",
+                    "x": 20,
+                    "y": 20,
+                    "width": 40,
+                    "height": 20,
+                    "source": "ocr",
+                    "control_type": "Text",
+                },
+                {
+                    "text": "Extensions",
+                    "x": 16,
+                    "y": 170,
+                    "width": 24,
+                    "height": 24,
+                    "source": "uia",
+                    "control_type": "Button",
+                },
+            ]
+        )
+        steps = [
+            {
+                "step": 1,
+                "instruction": "Click the Extensions button.",
+                "target_ref": "@e2",
+                "target_text": "Install",
+            }
+        ]
+
+        matched_step = attach_matches(steps, items)[0]
+
+        self.assertEqual(matched_step["match"]["ref"], "@e2")
+        self.assertEqual(matched_step["match"]["text"], "Extensions")
+        self.assertEqual(matched_step["match"]["match_method"], "ref")
+
+    def test_attach_matches_falls_back_to_target_text_when_ref_is_stale(self) -> None:
+        items = assign_screen_element_refs(
+            [
+                {
+                    "text": "Extensions",
+                    "x": 16,
+                    "y": 170,
+                    "width": 24,
+                    "height": 24,
+                    "source": "uia",
+                    "control_type": "Button",
+                }
+            ]
+        )
+        steps = [
+            {
+                "step": 1,
+                "instruction": "Click the Extensions button.",
+                "target_ref": "@e99",
+                "target_text": "Extensions",
+            }
+        ]
+
+        matched_step = attach_matches(steps, items)[0]
+
+        self.assertEqual(matched_step["match"]["ref"], "@e1")
+        self.assertEqual(matched_step["match"]["match_method"], "text")
 
     def test_attach_matches_can_target_synthetic_unlabeled_control_label(self) -> None:
         steps = [
@@ -508,6 +647,63 @@ class GuidanceFlowTests(unittest.TestCase):
         self.assertEqual(result["summary"], "Here is the next step to install.")
         self.assertTrue(result["is_continuation"])
         mock_capture.assert_called_once()
+
+    def test_run_reuses_fresh_ui_map_cache_without_ocr_or_uia(self) -> None:
+        screenshot = SimpleNamespace(
+            path="cached-screen.png",
+            width=1280,
+            height=720,
+            screen_width=1280,
+            screen_height=720,
+        )
+        active_app = {"title": "Jarvis - Visual Studio Code", "process": "Code.exe", "supported": True}
+        ai_response = {
+            "summary": "Click Extensions.",
+            "steps": [
+                {
+                    "step": 1,
+                    "instruction": "Click Extensions.",
+                    "target_ref": "@e1",
+                    "target_text": "Extensions",
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = UiMapCache(tmpdir, ttl_seconds=60)
+            signature = window_signature(active_app, screenshot, target_pid=None)
+            cache.save(
+                signature,
+                [
+                    {
+                        "ref": "@e1",
+                        "text": "Extensions",
+                        "x": 16,
+                        "y": 170,
+                        "width": 24,
+                        "height": 24,
+                        "confidence": 1,
+                        "control_type": "Button",
+                        "source": "uia",
+                    }
+                ],
+            )
+
+            with (
+                patch("main.UI_MAP_CACHE", cache),
+                patch("main.classify_request", return_value={"needs_screen": True}),
+                patch("utils.window.get_target_window_element", return_value=None),
+                patch("main.capture_screen", return_value=screenshot),
+                patch("main.resolve_locator_fast_path", return_value=None),
+                patch("main.get_active_window", return_value=active_app),
+                patch("main.extract_visible_text", side_effect=AssertionError("OCR should be skipped")),
+                patch("main.get_visible_ui_text", side_effect=AssertionError("UIA should be skipped")),
+                patch("main.ask_model", return_value=ai_response),
+            ):
+                result = run("click extensions")
+
+        self.assertEqual(result["steps"][0]["match"]["ref"], "@e1")
+        self.assertEqual(result["ocr"]["items"][0]["text"], "Extensions")
 
     def test_locator_target_extraction_removes_generic_words(self) -> None:
         self.assertEqual(extract_locator_target("where is the extension button?"), "extension")

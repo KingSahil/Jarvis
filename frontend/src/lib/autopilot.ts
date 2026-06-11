@@ -71,12 +71,25 @@ export async function runAutopilotLoop({
 
 export function isSafeAutopilotStep(step: TutorStep): boolean {
   if (!step.match) return false;
+  if (!isConfidentAutopilotMatch(step)) return false;
 
   const instruction = normalize(step.instruction);
   if (!instruction) return false;
   if (BLOCKED_ACTION_HINTS.some((hint) => instruction.includes(hint))) return false;
 
   return SAFE_ACTION_HINTS.some((hint) => instruction.includes(hint));
+}
+
+function isConfidentAutopilotMatch(step: TutorStep): boolean {
+  const match = step.match;
+  if (!match) return false;
+  if (match.match_method === 'ref' && match.ref && (!step.target_ref || step.target_ref === match.ref)) {
+    return true;
+  }
+  if (match.match_method === 'text') {
+    return match.is_exact_text === true && (match.ambiguous_candidate_count ?? 1) <= 1;
+  }
+  return match.is_exact_text === true && (match.ambiguous_candidate_count ?? 1) <= 1;
 }
 
 export function getClickablePoint(step: TutorStep): ScreenPoint {

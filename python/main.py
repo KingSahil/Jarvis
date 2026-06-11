@@ -13,10 +13,13 @@ from capture.screen import capture_screen
 from ocr.extract import extract_visible_text
 from utils.logging import get_logger
 from utils.matching import attach_matches, find_best_match_with_score
+from utils.screen_elements import assign_screen_element_refs
+from utils.ui_map_cache import UiMapCache, window_signature
 from utils.uia import get_visible_ui_text
 from utils.window import get_active_window, get_ignored_overlay_rects
 
 LOGGER = get_logger("blinky.main")
+UI_MAP_CACHE = UiMapCache()
 
 
 def skip_completed_navigation_steps(steps: list[dict]) -> list[dict]:
@@ -80,6 +83,7 @@ def _fill_empty_search_targets(steps: list[dict], visible_items: list[dict]) -> 
                 step.get("instruction"),
             )
             step["target_text"] = best_input.get("text", "")
+            step["target_ref"] = best_input.get("ref", "")
             step["match"] = best_input
 
     return steps
@@ -176,33 +180,7 @@ def run(
     active_started = time.perf_counter()
     active_app = get_active_window(target_pid=target_pid)
     log_stage_timing("active_window", active_started)
-    ocr_started = time.perf_counter()
-    ocr_items = extract_visible_text(screenshot.path)
-    ocr_items = filter_ignored_overlay_items(ocr_items, screenshot)
-    log_stage_timing("ocr", ocr_started)
-    uia_started = time.perf_counter()
-    uia_items = get_visible_ui_text(target_pid=target_pid)
-    log_stage_timing("uia", uia_started)
-
-    if os.name != "nt":
-        # On Linux (GNOME/Wayland), the system status bar is at the very top (y < 35 in optimized screenshot pixels).
-        # We filter out these elements to prevent accidental matching of system tray clocks, status indicators, or active app labels.
-        ocr_items = [item for item in ocr_items if item.get("y", 0) >= 35]
-        uia_items = [item for item in uia_items if item.get("y", 0) >= 35]
-
-    # UIA returns coordinates in screen-absolute space (physical pixel dimensions).
-    # The screenshot is scaled down to fit within 1920×1080 (thumbnail).
-    # The overlay then scales everything back up by (window.innerWidth / screenshot.width).
-    # To make both scales cancel correctly, we must first convert UIA coords
-    # from screen space → screenshot space before the overlay sees them.
-    if screenshot.screen_width != screenshot.width or screenshot.screen_height != screenshot.height:
-        uia_items = scale_uia_items_to_screenshot(uia_items, screenshot)
-
-    visible_items = merge_visible_items(ocr_items, uia_items)
-
-    # Sort all visible items in spatial reading order (top-to-bottom, left-to-right)
-    # with a 10-pixel Y bucket tolerance for elements on the same horizontal line.
-    visible_items.sort(key=lambda item: (int(item.get("y", 0) / 10), item.get("x", 0)))
+    visible_items = get_or_build_visible_ui_map(active_app, screenshot, target_pid)
 
     if not visible_items:
         warnings.append("No OCR text was detected. Try zooming in or opening a supported app.")
@@ -249,6 +227,44 @@ def run(
         "warnings": warnings + ai_result.get("warnings", []),
         "is_continuation": is_continuation,
     }
+
+
+def get_or_build_visible_ui_map(active_app: dict, screenshot, target_pid: int | None = None) -> list[dict]:
+    signature = window_signature(active_app, screenshot, target_pid=target_pid)
+
+    def build_items() -> list[dict]:
+        ocr_started = time.perf_counter()
+        ocr_items = extract_visible_text(screenshot.path)
+        ocr_items = filter_ignored_overlay_items(ocr_items, screenshot)
+        log_stage_timing("ocr", ocr_started)
+        uia_started = time.perf_counter()
+        uia_items = get_visible_ui_text(target_pid=target_pid)
+        log_stage_timing("uia", uia_started)
+
+        if os.name != "nt":
+            # On Linux (GNOME/Wayland), the system status bar is at the very top (y < 35 in optimized screenshot pixels).
+            # We filter out these elements to prevent accidental matching of system tray clocks, status indicators, or active app labels.
+            ocr_items_filtered = [item for item in ocr_items if item.get("y", 0) >= 35]
+            uia_items_filtered = [item for item in uia_items if item.get("y", 0) >= 35]
+        else:
+            ocr_items_filtered = ocr_items
+            uia_items_filtered = uia_items
+
+        # UIA returns coordinates in screen-absolute space (physical pixel dimensions).
+        # The screenshot is scaled down to fit within 1920x1080 (thumbnail).
+        # The overlay then scales everything back up by (window.innerWidth / screenshot.width).
+        # To make both scales cancel correctly, we must first convert UIA coords
+        # from screen space -> screenshot space before the overlay sees them.
+        if screenshot.screen_width != screenshot.width or screenshot.screen_height != screenshot.height:
+            uia_items_filtered = scale_uia_items_to_screenshot(uia_items_filtered, screenshot)
+
+        merged = assign_screen_element_refs(merge_visible_items(ocr_items_filtered, uia_items_filtered))
+        merged.sort(key=lambda item: (int(item.get("y", 0) / 10), item.get("x", 0)))
+        return merged
+
+    visible_items = UI_MAP_CACHE.get_or_build(signature, build_items)
+    visible_items.sort(key=lambda item: (int(item.get("y", 0) / 10), item.get("x", 0)))
+    return visible_items
 
 
 # All query resolution is handled automatically by the AI model.
@@ -366,7 +382,7 @@ def resolve_locator_fast_path(question: str, screenshot, target_pid: int | None,
         ocr_items = [item for item in ocr_items if item.get("y", 0) >= 35]
         uia_items = [item for item in uia_items if item.get("y", 0) >= 35]
 
-    visible_items = merge_visible_items(ocr_items, uia_items)
+    visible_items = assign_screen_element_refs(merge_visible_items(ocr_items, uia_items))
     visible_items.sort(key=lambda item: (int(item.get("y", 0) / 10), item.get("x", 0)))
     match_result = find_best_match_with_score(target, locator_match_items(question, visible_items), instruction)
     if match_result:

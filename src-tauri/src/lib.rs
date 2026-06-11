@@ -2,6 +2,8 @@ mod websocket;
 
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -485,6 +487,49 @@ fn python_executable(root: &PathBuf) -> PathBuf {
     }
 }
 
+fn start_ui_observer(app: &AppHandle) {
+    if std::env::var("BLINKY_DISABLE_UI_OBSERVER")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let root = match project_root(app) {
+        Ok(root) => root,
+        Err(err) => {
+            eprintln!("Warning: UI observer skipped because project root was not found: {err}");
+            return;
+        }
+    };
+    let script = root.join("python").join("ui_observer.py");
+    if !script.exists() {
+        eprintln!("Warning: UI observer script was not found: {}", script.display());
+        return;
+    }
+
+    let mut command = Command::new(python_executable(&root));
+    command
+        .arg(script)
+        .arg("--parent-pid")
+        .arg(std::process::id().to_string())
+        .current_dir(&root)
+        .env("PYTHONWARNINGS", "ignore")
+        .envs(read_env_file(&root))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(0x08000000);
+    }
+
+    if let Err(err) = command.spawn() {
+        eprintln!("Warning: Failed to start UI observer: {err}");
+    }
+}
+
 fn open_url_impl(url: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let mut command = {
@@ -637,6 +682,7 @@ pub fn run() {
         })
         .setup(|app| {
             setup_tray(app)?;
+            start_ui_observer(&app.handle());
 
             // Start background WebSocket server for remote control
             tauri::async_runtime::spawn(async move {

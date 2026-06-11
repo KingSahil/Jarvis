@@ -80,6 +80,29 @@ describe('getHighlightSteps', () => {
     expect(getHighlightSteps(steps)).toEqual(steps);
   });
 
+  test('keeps ref-only matched guidance', () => {
+    const steps = [
+      {
+        step: 1,
+        instruction: 'Click the sidebar button.',
+        target_ref: '@e4',
+        target_text: '',
+        match: {
+          ref: '@e4',
+          text: '',
+          x: 16,
+          y: 170,
+          width: 24,
+          height: 24,
+          confidence: 1,
+          match_method: 'ref' as const,
+        },
+      },
+    ];
+
+    expect(getHighlightSteps(steps)).toEqual(steps);
+  });
+
   test('highlights only the next matched step in a workflow', () => {
     const steps = [
       {

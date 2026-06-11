@@ -5,11 +5,41 @@ from difflib import SequenceMatcher
 def attach_matches(steps: list[dict], ocr_items: list[dict]) -> list[dict]:
     matched_steps = []
     for step in steps:
+        target_ref = str(step.get("target_ref", "")).strip()
         target = str(step.get("target_text", "")).strip()
         instruction = str(step.get("instruction", "")).strip()
-        match = find_best_match(target, ocr_items, instruction) if target else None
+        match = _find_by_ref(target_ref, ocr_items) if target_ref else None
+        if match is None and target:
+            result = find_best_match_with_score(target, ocr_items, instruction)
+            if result:
+                match = {
+                    **result["item"],
+                    "score": result["score"],
+                    "text_similarity": result["text_similarity"],
+                    "is_exact_text": result["is_exact_text"],
+                    "match_method": "text",
+                    "candidate_count": result["candidate_count"],
+                    "ambiguous_candidate_count": result["ambiguous_candidate_count"],
+                }
         matched_steps.append({**step, "match": match})
     return matched_steps
+
+
+def _find_by_ref(target_ref: str, ocr_items: list[dict]) -> dict | None:
+    if not target_ref:
+        return None
+    for item in ocr_items:
+        if str(item.get("ref", "")).strip() == target_ref:
+            return {
+                **item,
+                "score": 1.0,
+                "text_similarity": 1.0,
+                "is_exact_text": True,
+                "match_method": "ref",
+                "candidate_count": 1,
+                "ambiguous_candidate_count": 1,
+            }
+    return None
 
 
 def find_best_match(target: str, ocr_items: list[dict], instruction: str = "") -> dict | None:

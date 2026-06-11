@@ -1,4 +1,5 @@
 export interface OcrItem {
+  ref?: string;
   text: string;
   x: number;
   y: number;
@@ -6,11 +7,22 @@ export interface OcrItem {
   height: number;
   confidence: number;
   control_type?: string;
+  source?: string;
+  clickable?: boolean;
+  input?: boolean;
+  automation_id?: string;
+  ai_label?: string;
+  match_method?: 'ref' | 'text';
+  score?: number;
+  text_similarity?: number;
+  is_exact_text?: boolean;
+  ambiguous_candidate_count?: number;
 }
 
 export interface TutorStep {
   step: number;
   instruction: string;
+  target_ref?: string;
   target_text: string;
   match?: OcrItem | null;
 }

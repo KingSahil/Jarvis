@@ -111,12 +111,14 @@ def _validate_response(payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(step, dict):
             continue
         instruction = str(step.get("instruction", "")).strip()
+        target_ref = str(step.get("target_ref", "")).strip()
         target_text = str(step.get("target_text", "")).strip()
         if instruction:
             normalized_steps.append(
                 {
                     "step": int(step.get("step") or index),
                     "instruction": instruction,
+                    "target_ref": target_ref,
                     "target_text": target_text,
                 }
             )

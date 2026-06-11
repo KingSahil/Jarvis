@@ -18,6 +18,17 @@ function step(instruction: string, target = 'Gaming'): TutorStep {
   };
 }
 
+function refStep(instruction: string, target = 'Gaming'): TutorStep {
+  const next = step(instruction, target);
+  next.target_ref = '@e1';
+  next.match = {
+    ...next.match!,
+    ref: '@e1',
+    match_method: 'ref',
+  };
+  return next;
+}
+
 function result(steps: TutorStep[], summary = 'next'): TutorResult {
   return {
     summary,
@@ -31,16 +42,28 @@ function result(steps: TutorStep[], summary = 'next'): TutorResult {
 
 describe('isSafeAutopilotStep', () => {
   test('allows matched click/open/select steps', () => {
-    expect(isSafeAutopilotStep(step('Click the Gaming section.'))).toBe(true);
-    expect(isSafeAutopilotStep(step('Open Gaming.'))).toBe(true);
-    expect(isSafeAutopilotStep(step('Select Gaming.'))).toBe(true);
+    expect(isSafeAutopilotStep(refStep('Click the Gaming section.'))).toBe(true);
+    expect(isSafeAutopilotStep(refStep('Open Gaming.'))).toBe(true);
+    expect(isSafeAutopilotStep(refStep('Select Gaming.'))).toBe(true);
   });
 
   test('rejects typing, submit, install, buy, and unmatched steps', () => {
-    expect(isSafeAutopilotStep(step('Type milk into the search box.'))).toBe(false);
-    expect(isSafeAutopilotStep(step('Click Buy Now.'))).toBe(false);
-    expect(isSafeAutopilotStep(step('Click Install.'))).toBe(false);
-    expect(isSafeAutopilotStep({ ...step('Click Gaming.'), match: null })).toBe(false);
+    expect(isSafeAutopilotStep(refStep('Type milk into the search box.'))).toBe(false);
+    expect(isSafeAutopilotStep(refStep('Click Buy Now.'))).toBe(false);
+    expect(isSafeAutopilotStep(refStep('Click Install.'))).toBe(false);
+    expect(isSafeAutopilotStep({ ...refStep('Click Gaming.'), match: null })).toBe(false);
+  });
+
+  test('rejects fuzzy non-exact matches for autopilot clicks', () => {
+    const fuzzy = step('Click the Gaming section.');
+    fuzzy.match = {
+      ...fuzzy.match!,
+      text_similarity: 0.72,
+      match_method: 'text',
+      is_exact_text: false,
+    };
+
+    expect(isSafeAutopilotStep(fuzzy)).toBe(false);
   });
 });
 
@@ -66,7 +89,7 @@ describe('getClickablePoint', () => {
 describe('runAutopilotLoop', () => {
   test('observes, clicks, then observes again until done', async () => {
     const clicked: Array<{ x: number; y: number }> = [];
-    const observations = [result([step('Click Gaming.')]), result([], 'Done')];
+    const observations = [result([refStep('Click Gaming.')]), result([], 'Done')];
 
     const output = await runAutopilotLoop({
       maxAttempts: 5,
@@ -83,7 +106,7 @@ describe('runAutopilotLoop', () => {
 
   test('clicks physical screen coordinates when screenshot was downsampled', async () => {
     const clicked: Array<{ x: number; y: number }> = [];
-    const first = result([step('Click Gaming.')]);
+    const first = result([refStep('Click Gaming.')]);
     first.screenshot = {
       path: 'screenshots/test.jpg',
       width: 1728,
@@ -108,7 +131,7 @@ describe('runAutopilotLoop', () => {
       maxAttempts: 5,
       observe: async () => {
         observes += 1;
-        return result([step(`Click Gaming ${observes}.`)]);
+        return result([refStep(`Click Gaming ${observes}.`)]);
       },
       act: async () => {},
       wait: async () => {},
@@ -124,7 +147,7 @@ describe('runAutopilotLoop', () => {
       maxAttempts: 5,
       observe: async () => {
         observes += 1;
-        return result([step('Click Gaming.')]);
+        return result([refStep('Click Gaming.')]);
       },
       act: async () => {},
       wait: async () => {},
@@ -143,7 +166,7 @@ describe('runAutopilotLoop', () => {
       observeAfterAction: false,
       observe: async () => {
         observes += 1;
-        return result([step('Click Gaming.')]);
+        return result([refStep('Click Gaming.')]);
       },
       act: async (point) => clicked.push(point),
       wait: async () => {},

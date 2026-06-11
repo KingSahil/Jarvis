@@ -10,6 +10,7 @@ tmp/
 frontend/dist/
 src-tauri/target/
 screenshots/
+python/cache/
 
 # Log Files
 *.log
