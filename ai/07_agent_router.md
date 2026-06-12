@@ -72,9 +72,10 @@ Before registered tool routing and code generation, `agent_router.py` handles br
 - `search ...` or `google ...`
 - `open/search/find/play <terms> on youtube`
 - `open/search/find/play <terms> in youtube`
-- AI-resolved open/navigation intents such as `open whatsapp`, `open notion`, or `launch spotify`
+- AI-resolved open/navigation intents such as `open whatsapp`, `open notion`, or `launch spotify` (web URL resolution)
 
 These fast paths avoid generated Playwright tools for common navigation. The browser planner described below is preferred for web tasks that need visible Edge automation.
+These resolvers are browser-oriented (`webbrowser.open`) and do not call desktop computer-use tools in `python/computer_use/`.
 
 ## 5. Safe Browser Planner
 
@@ -151,3 +152,9 @@ Each chunk is forwarded to the WebSocket client using the `is_chunk` processing 
 - The router writes to `python/tools/` and `python/tools/registry.json`.
 - Power commands are immediate OS commands from Rust and should only be exposed on trusted local networks.
 - WebSocket binding is `0.0.0.0:9001`; firewall/network policy matters.
+
+## 11. Boundary with Desktop Computer-Use Mode
+
+- The router serves mobile and WebSocket-driven browser intelligence requests.
+- Desktop direct actions (`open app`, `press shortcut`, `play <song> on Spotify`) are handled by `python/main.py` agent mode through `python/computer_use/agent.py` and `python/computer_use/tools.py`.
+- Keep this boundary explicit: router for browser/web flows, computer-use for local OS/app actions.

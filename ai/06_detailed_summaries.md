@@ -117,6 +117,7 @@ Stdin/stdout screen-tutor orchestrator.
 - Classifies screen vs chat requests.
 - Handles continuation and conversation history.
 - Runs the Web Intelligence Layer when `web_search_enabled` is true.
+- In `agent_mode`, attempts direct computer-use actions first (`OPEN_APP`, `MEDIA_PLAYBACK`, `SYSTEM_SHORTCUT`) and falls back to screen mode on failed tool execution.
 - Captures screen and prints `__BLINKY_CAPTURED__`.
 - Resolves locator fast-path requests.
 - Reads active app metadata, OCR items, and UIA items.
@@ -124,6 +125,24 @@ Stdin/stdout screen-tutor orchestrator.
 - Merges and sorts visible items.
 - Builds prompts, calls the selected AI provider, attaches matches, fills search fallbacks, and slices to one step.
 - Returns both optimized screenshot dimensions and physical screen dimensions so frontend clicks can be scaled correctly.
+
+### `python/computer_use/agent.py`
+
+Regex-first routing helper for desktop agent mode.
+
+- Routes app-launch commands (`open/launch/start <app>`) to `open_app_tool()`.
+- Routes Spotify media requests (`play ... on/in spotify` or `play spotify ...`) to `play_spotify_track_tool()`.
+- Routes contextual help-menu requests to `shortcut_tool("alt+h")` when VS Code-like context is detected.
+- Avoids treating in-app actions like “open new tab” as app-launch requests.
+
+### `python/computer_use/tools.py`
+
+Windows-first direct action toolset used by agent mode.
+
+- `open_app_tool()`: protocol -> known executable path -> `Get-StartApps` AppID -> safe process alias -> Windows Search fallback.
+- `shortcut_tool()`: normalizes user shortcuts into pywinauto key syntax and sends them.
+- `play_spotify_track_tool()`: resolves a Spotify track URI using SearXNG first, then DuckDuckGo HTML fallback, and opens it with `os.startfile("spotify:track:...")`.
+- Returns typed `ToolResult` objects so callers can safely fall back when actions fail.
 
 ### `python/ai/prompt.py`
 

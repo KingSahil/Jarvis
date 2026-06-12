@@ -37,6 +37,10 @@
       "desc": "Expo mobile remote controller, WebSocket lifecycle, query UI, streamed results, and power commands"
     },
     {
+      "path": "ai/09_computer_use_and_spotify.md",
+      "desc": "Human and AI reference for desktop agent-mode computer-use actions, Spotify playback, and routing boundaries with mobile/router flows"
+    },
+    {
       "path": "frontend/src/main.tsx",
       "desc": "React route switch for command bar, overlay, and fallback app"
     },
