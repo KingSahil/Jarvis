@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { getClickablePoint, getPhysicalClickablePoint, isSafeAutopilotStep, runAutopilotLoop } from '../src/lib/autopilot';
+import { getClickablePoint, getPhysicalClickablePoint, isSafeAutopilotStep, runAutopilotLoop, extractTextToType, shouldPressEnterAfterTyping, isScrollAction, getScrollDirection } from '../src/lib/autopilot';
 import type { TutorResult, TutorStep } from '../src/lib/types';
 
 function step(instruction: string, target = 'Gaming'): TutorStep {
@@ -41,14 +41,15 @@ function result(steps: TutorStep[], summary = 'next'): TutorResult {
 }
 
 describe('isSafeAutopilotStep', () => {
-  test('allows matched click/open/select steps', () => {
+  test('allows matched click/open/select/type/scroll steps', () => {
     expect(isSafeAutopilotStep(refStep('Click the Gaming section.'))).toBe(true);
     expect(isSafeAutopilotStep(refStep('Open Gaming.'))).toBe(true);
     expect(isSafeAutopilotStep(refStep('Select Gaming.'))).toBe(true);
+    expect(isSafeAutopilotStep(refStep('Type milk into the search box.'))).toBe(true);
+    expect(isSafeAutopilotStep(refStep('Scroll down on the page.'))).toBe(true);
   });
 
-  test('rejects typing, submit, install, buy, and unmatched steps', () => {
-    expect(isSafeAutopilotStep(refStep('Type milk into the search box.'))).toBe(false);
+  test('rejects high-risk, install, buy, and unmatched steps', () => {
     expect(isSafeAutopilotStep(refStep('Click Buy Now.'))).toBe(false);
     expect(isSafeAutopilotStep(refStep('Click Install.'))).toBe(false);
     expect(isSafeAutopilotStep({ ...refStep('Click Gaming.'), match: null })).toBe(false);
@@ -64,6 +65,34 @@ describe('isSafeAutopilotStep', () => {
     };
 
     expect(isSafeAutopilotStep(fuzzy)).toBe(false);
+  });
+});
+
+describe('extractTextToType', () => {
+  test('extracts text inside quotes', () => {
+    expect(extractTextToType("Type 'I love pizza' in the search bar")).toBe('I love pizza');
+    expect(extractTextToType('Type "milk" into search box')).toBe('milk');
+  });
+
+  test('extracts text without quotes using prepositions as boundary', () => {
+    expect(extractTextToType('Type milk into the search box')).toBe('milk');
+    expect(extractTextToType('Type some search query and press enter')).toBe('some search query');
+    expect(extractTextToType('Search for apples in grocery app')).toBe('apples');
+  });
+
+  test('returns null if no match', () => {
+    expect(extractTextToType('Click the button')).toBe(null);
+  });
+});
+
+describe('shouldPressEnterAfterTyping', () => {
+  test('returns true if instruction mentions enter or search', () => {
+    expect(shouldPressEnterAfterTyping('Type milk and press Enter')).toBe(true);
+    expect(shouldPressEnterAfterTyping('Search for apples')).toBe(true);
+  });
+
+  test('returns false otherwise', () => {
+    expect(shouldPressEnterAfterTyping('Type milk')).toBe(false);
   });
 });
 
@@ -178,3 +207,29 @@ describe('runAutopilotLoop', () => {
     expect(output.stopReason).toBe('single_action');
   });
 });
+
+describe('isScrollAction', () => {
+  test('returns true for actions containing scroll', () => {
+    expect(isScrollAction('Scroll down')).toBe(true);
+    expect(isScrollAction('Scroll up the list')).toBe(true);
+    expect(isScrollAction('please scroll to find the element')).toBe(true);
+  });
+
+  test('returns false otherwise', () => {
+    expect(isScrollAction('Click the list')).toBe(false);
+    expect(isScrollAction('Type scroll in the input')).toBe(false);
+  });
+});
+
+describe('getScrollDirection', () => {
+  test('returns up if instruction mentions scroll up', () => {
+    expect(getScrollDirection('scroll up')).toBe('up');
+    expect(getScrollDirection('please scroll up the list')).toBe('up');
+  });
+
+  test('returns down by default or if scroll down is mentioned', () => {
+    expect(getScrollDirection('scroll down')).toBe('down');
+    expect(getScrollDirection('scroll')).toBe('down');
+  });
+});
+

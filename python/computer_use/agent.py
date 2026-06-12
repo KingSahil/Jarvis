@@ -11,18 +11,46 @@ OPEN_APP_RE = re.compile(
     re.IGNORECASE,
 )
 
+PLAY_SPOTIFY_RE = re.compile(
+    r"^\s*play\s+(?:spotify\s+(?P<song1>.+)|(?P<song2>.+?)\s+(?:in|on)\s+spotify)\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_in_app_action(app_name: str) -> bool:
+    app_lower = app_name.lower().strip()
+    in_app_keywords = {
+        "tab", "tabs", "settings", "menu", "sidebar", "extensions", "status", "profile",
+        "chat", "chats", "bookmark", "bookmarks", "download", "downloads", "folder", "folders",
+        "file", "files", "history", "recent", "preferences", "terminal", "console"
+    }
+    return any(re.search(rf"\b{re.escape(word)}\b", app_lower) for word in in_app_keywords)
+
 
 def try_run_agent_action(question: str, observation: dict[str, Any] | None = None) -> ToolResult | None:
-    if wants_help_menu(question, observation):
+    # Clean trailing punctuation for robust matching of voice input/dictation
+    question_cleaned = question.strip().rstrip("?.!,;:")
+
+    if wants_help_menu(question_cleaned, observation):
         return shortcut_tool("alt+h")
 
-    match = OPEN_APP_RE.match(question)
+    # Match play spotify request
+    play_match = PLAY_SPOTIFY_RE.match(question_cleaned)
+    if play_match:
+        song = play_match.group("song1") or play_match.group("song2")
+        if song:
+            from .tools import play_spotify_track_tool
+            return play_spotify_track_tool(song.strip())
+
+    match = OPEN_APP_RE.match(question_cleaned)
     if match:
         app = cleanup_app_name(match.group("app"))
         if app and app not in {"help", "settings", "menu"}:
-            return open_app_tool(app)
+            if not is_in_app_action(app):
+                return open_app_tool(app)
 
     return None
+
 
 
 def cleanup_app_name(value: str) -> str:

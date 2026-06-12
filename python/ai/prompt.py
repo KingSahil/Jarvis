@@ -205,6 +205,7 @@ Rules:
 - If the student's request is action-oriented (such as requesting to install, download, open, run, configure, find, search, or navigate) but the relevant panel, input, or control is not currently visible on the screen, do NOT return an empty steps list. Instead, generate a step to open the relevant panel, tab, or menu (e.g., clicking a visible sidebar icon/button or menu item, or directing the user to open/click it). Set "target_text": "" if the control is not currently visible.
 - If the user asks where an element is located, or asks you to "tell", "show", "point to", or "locate" a button, file, tab, or menu, this is NOT a purely informational query. Return a step with the exact visible target element under "target_ref" and "target_text" so that Blinky highlights it for the student.
 - Only return an empty list [] for "steps" if the student's request is purely informational (e.g. asking to explain a concept, summarize the screen, read text, or answer a general knowledge question that does not require any user action, navigation, or configuration).
+- If the student's request asks to scroll, or if the target element/content is not currently visible but likely accessible by scrolling, return a step with an instruction starting with 'Scroll down' or 'Scroll up' and set the target_ref to the @ref of the scrollable container, list, panel, or active window.
 
 
 Return valid JSON only.
@@ -217,7 +218,7 @@ Format A (For interactive tasks where a UI workflow is needed):
   "steps": [
     {{
       "step": 1,
-      "instruction": "Click/type the immediate next action the student should take right now.",
+      "instruction": "Click/type/scroll the immediate next action the student should take right now. Start with 'Scroll down' or 'Scroll up' if they need to scroll.",
       "target_ref": "Exact @ref of the visible target, or empty string if it is not visible",
       "target_text": "Exact visible text of the next control to interact with, or empty string if it is not visible"
     }}

@@ -104,3 +104,9 @@ def test_windows_search_fallback_clicks_visible_result() -> None:
 
 def test_normalize_shortcut_translates_alt_h() -> None:
     assert normalize_shortcut("alt+h") == "%h"
+
+
+def test_agent_ignores_in_app_open_requests() -> None:
+    assert try_run_agent_action("open new tab") is None
+    assert try_run_agent_action("open settings") is None
+    assert try_run_agent_action("open status on whatsapp") is None

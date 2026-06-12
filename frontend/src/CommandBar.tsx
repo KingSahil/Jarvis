@@ -3,7 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ArrowUp, Bot, Loader2, Minus, Sparkles, X, Settings, Check, Mic, Volume2, Globe, Square } from 'lucide-react';
 import { AnchorHTMLAttributes, FormEvent, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { runAutopilotLoop } from './lib/autopilot';
+import { runAutopilotLoop, extractTextToType, shouldPressEnterAfterTyping, isScrollAction, getScrollDirection } from './lib/autopilot';
 import {
   getCurrentGuideSteps,
   getDisplaySteps,
@@ -12,7 +12,7 @@ import {
   shouldCompleteStepOnHighlightClick,
   shouldShowSummaryBubble,
 } from './lib/guidance';
-import { runTutor, showOverlay, hideOverlay, resizeCommandWindow, getSettings, saveSettings, resizeAndMoveCommandWindow, clickScreenPoint, openUrl } from './lib/tauri';
+import { runTutor, showOverlay, hideOverlay, resizeCommandWindow, getSettings, saveSettings, resizeAndMoveCommandWindow, clickScreenPoint, openUrl, typeText, scrollAtPoint } from './lib/tauri';
 import { linkCitationMarkers } from './lib/citations';
 import { buildAudioDataUrl, buildSarvamTtsPayload, buildSpeechContent, getSarvamErrorMessage } from './lib/tts';
 import type { TutorConversationMessage, TutorProgress, TutorResult } from './lib/types';
@@ -402,8 +402,8 @@ export function CommandBar() {
       if (agentModeEnabled) {
         let firstObservation: TutorResult | null = null;
         const autopilot = await runAutopilotLoop({
-          maxAttempts: 1,
-          observeAfterAction: false,
+          maxAttempts: 5,
+          observeAfterAction: true,
           observe: async () => {
             if (!firstObservation) {
               firstObservation = await runTutor(queryText, previousQuestion, currentProgress(), conversationHistory, false, true);
@@ -412,18 +412,55 @@ export function CommandBar() {
             return runTutor(queryText, previousQuestion, currentProgress(), conversationHistory, false, true);
           },
           act: async (point, step) => {
-            setStatus(`Autopilot clicking (${point.x}, ${point.y})...`);
-            rememberCompletedStep(step.target_text, step.instruction);
-            await clickScreenPoint(point.x, point.y);
+            if (isScrollAction(step.instruction)) {
+              const direction = getScrollDirection(step.instruction);
+              setStatus(`Autopilot scrolling ${direction}...`);
+              rememberCompletedStep(step.target_text, step.instruction);
+              await scrollAtPoint(point.x, point.y, direction, 3);
+            } else {
+              const textToType = extractTextToType(step.instruction);
+              if (textToType !== null) {
+                setStatus(`Autopilot typing "${textToType}"...`);
+                rememberCompletedStep(step.target_text, step.instruction);
+                await clickScreenPoint(point.x, point.y);
+                await new Promise((resolve) => setTimeout(resolve, 150));
+                const pressEnter = shouldPressEnterAfterTyping(step.instruction);
+                await typeText(textToType, pressEnter);
+              } else {
+                setStatus(`Autopilot clicking (${point.x}, ${point.y})...`);
+                rememberCompletedStep(step.target_text, step.instruction);
+                await clickScreenPoint(point.x, point.y);
+              }
+            }
           },
         });
-        if (autopilot.stopReason === 'single_action') {
-          const completedStep = autopilot.finalResult.steps.find((candidate) => candidate.instruction.trim());
-          const completedLabel = completedStep?.target_text || completedStep?.instruction || 'the selected target';
+        if (autopilot.stopReason === 'complete') {
           result = {
             ...autopilot.finalResult,
-            summary: `Clicked ${completedLabel}. Type again when you want the next step.`,
+            summary: `Autopilot successfully completed the task!`,
             steps: [],
+          };
+        } else if (autopilot.stopReason === 'unsafe_step') {
+          const nextStep = autopilot.finalResult.steps.find((candidate) => candidate.instruction.trim());
+          const blockedLabel = nextStep?.target_text || nextStep?.instruction || 'the next action';
+          result = {
+            ...autopilot.finalResult,
+            summary: `Autopilot paused because "${blockedLabel}" requires manual interaction for safety.`,
+          };
+        } else if (autopilot.stopReason === 'missing_target') {
+          result = {
+            ...autopilot.finalResult,
+            summary: `Autopilot stopped because it could not locate the next target on the screen. Please guide me manually.`,
+          };
+        } else if (autopilot.stopReason === 'unchanged_after_action') {
+          result = {
+            ...autopilot.finalResult,
+            summary: `Autopilot stopped because the screen did not change after the last action. Please try manually.`,
+          };
+        } else if (autopilot.stopReason === 'max_attempts') {
+          result = {
+            ...autopilot.finalResult,
+            summary: `Autopilot reached the maximum number of attempts. Please complete the remaining steps manually.`,
           };
         } else {
           result = autopilot.finalResult;

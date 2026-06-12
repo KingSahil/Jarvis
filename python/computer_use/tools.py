@@ -277,3 +277,136 @@ def normalize_shortcut(shortcut: str) -> str:
     if any(modifier in {"win", "windows", "super"} for modifier in modifiers):
         output += "{VK_LWIN up}"
     return output
+
+
+def play_spotify_track_tool(song_name: str) -> ToolResult:
+    import asyncio
+
+    if os.name != "nt":
+        return ToolResult(
+            False,
+            "play_spotify",
+            "Playing Spotify tracks via URI is currently supported on Windows only.",
+            {"song_name": song_name},
+        )
+
+    try:
+        import threading
+        from concurrent.futures import Future
+
+        future: Future[str | None] = Future()
+
+        def run_in_thread():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(resolve_spotify_track_uri(song_name))
+                future.set_result(result)
+            except Exception as ex:
+                future.set_exception(ex)
+            finally:
+                loop.close()
+
+        thread = threading.Thread(target=run_in_thread)
+        thread.start()
+        track_uri = future.result()
+
+        if not track_uri:
+            return ToolResult(
+                False,
+                "play_spotify",
+                f"Could not find track '{song_name}' on Spotify.",
+                {"song_name": song_name},
+            )
+
+        os.startfile(track_uri)  # type: ignore[attr-defined]
+        return ToolResult(
+            True,
+            "play_spotify",
+            f"Playing '{song_name}' in Spotify.",
+            {"song_name": song_name, "track_uri": track_uri},
+        )
+    except Exception as e:
+        LOGGER.exception("Error in play_spotify_track_tool")
+        return ToolResult(
+            False,
+            "play_spotify",
+            f"Error playing '{song_name}' on Spotify: {str(e)}",
+            {"song_name": song_name, "error": str(e)},
+        )
+
+
+def clean_song_query(query: str) -> str:
+    # Normalize spaces
+    query = " ".join(query.strip().split())
+
+    # Words to strip from start or end (case-insensitive)
+    strip_words = {
+        "any", "latest", "new", "newest", "some", "a", "the", "recent", "trending",
+        "popular", "song", "track", "music", "artist", "singer", "playlist", "by"
+    }
+
+    words = query.split()
+    changed = True
+    while changed and words:
+        changed = False
+        # Check start word
+        if words[0].lower() in strip_words:
+            words.pop(0)
+            changed = True
+        # Check end word
+        elif words and words[-1].lower() in strip_words:
+            words.pop()
+            changed = True
+
+    cleaned = " ".join(words).strip()
+    return cleaned if cleaned else query
+
+
+async def resolve_spotify_track_uri(song_name: str) -> str | None:
+    from wil.searxng_client import SearXNGClient
+    from wil.http_fetcher import fetch_html
+    import urllib.parse
+
+    cleaned_query = clean_song_query(song_name)
+    LOGGER.info(f"Resolving Spotify URI for '{song_name}' (cleaned: '{cleaned_query}')")
+
+    # List of queries to try sequentially
+    queries = [
+        # Query 1: Specific track page search
+        f"site:open.spotify.com/track {cleaned_query}",
+        # Query 2: Broader search to find track links in top results
+        f"{cleaned_query} spotify track"
+    ]
+
+    # 1. Try SearXNG client first
+    try:
+        client = SearXNGClient()
+        for q in queries:
+            results = await client.search_category(q, category="general", limit=5)
+            for r in results:
+                url = r.get("url", "")
+                if "open.spotify.com/track/" in url:
+                    match = re.search(r"track/([a-zA-Z0-9]+)", url)
+                    if match:
+                        return f"spotify:track:{match.group(1)}"
+    except Exception as e:
+        LOGGER.warning(f"SearXNG Spotify search failed: {e}")
+
+    # 2. Fallback to DuckDuckGo HTML Search
+    for q in queries:
+        try:
+            query_encoded = urllib.parse.quote(q)
+            url = f"https://html.duckduckgo.com/html/?q={query_encoded}"
+            html = await fetch_html(url)
+            if html:
+                unquoted_html = urllib.parse.unquote(html)
+                matches = re.findall(r"open\.spotify\.com/track/([a-zA-Z0-9]+)", unquoted_html)
+                if matches:
+                    return f"spotify:track:{matches[0]}"
+        except Exception as e:
+            LOGGER.warning(f"DuckDuckGo fallback search for '{q}' failed: {e}")
+
+    return None
+
+

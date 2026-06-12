@@ -136,6 +136,16 @@ fn click_screen_point(x: i32, y: i32) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn scroll_at_point(x: i32, y: i32, direction: String, amount: i32) -> Result<(), String> {
+    scroll_at_point_impl(x, y, &direction, amount)
+}
+
+#[tauri::command]
+fn type_text(text: String, press_enter: bool) -> Result<(), String> {
+    type_text_impl(&text, press_enter)
+}
+
+#[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     let trimmed = url.trim();
     if !(trimmed.starts_with("https://") || trimmed.starts_with("http://")) {
@@ -666,6 +676,8 @@ pub fn run() {
             show_overlay,
             hide_overlay,
             click_screen_point,
+            scroll_at_point,
+            type_text,
             open_url,
             show_command_bar,
             resize_command_window,
@@ -871,9 +883,86 @@ fn mouse_input(dx: i32, dy: i32, flags: u32) -> windows_sys::Win32::UI::Input::K
     }
 }
 
+#[cfg(target_os = "windows")]
+fn scroll_at_point_impl(x: i32, y: i32, direction: &str, amount: i32) -> Result<(), String> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_MOUSE, MOUSEEVENTF_MOVE, MOUSEEVENTF_ABSOLUTE,
+        MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, INPUT_0,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+        SM_YVIRTUALSCREEN,
+    };
+
+    let left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let top = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+    if width <= 1 || height <= 1 {
+        return Err("Cannot determine virtual screen size".to_string());
+    }
+
+    let absolute_x = ((x - left) as i64 * 65535 / (width - 1) as i64) as i32;
+    let absolute_y = ((y - top) as i64 * 65535 / (height - 1) as i64) as i32;
+    let flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+
+    let wheel_delta = 120;
+    let scroll_amount = if direction.eq_ignore_ascii_case("down") {
+        -wheel_delta * amount
+    } else {
+        wheel_delta * amount
+    };
+
+    let mut inputs = [
+        INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx: absolute_x,
+                    dy: absolute_y,
+                    mouseData: 0,
+                    dwFlags: flags | MOUSEEVENTF_MOVE,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+        INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx: 0,
+                    dy: 0,
+                    mouseData: scroll_amount as u32,
+                    dwFlags: MOUSEEVENTF_WHEEL,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+    ];
+
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_mut_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        )
+    };
+    if sent != inputs.len() as u32 {
+        return Err(format!("SendInput sent {sent} of {} events", inputs.len()));
+    }
+    Ok(())
+}
+
 #[cfg(not(target_os = "windows"))]
 fn click_screen_point_impl(_x: i32, _y: i32) -> Result<(), String> {
     Err("Autopilot clicking is only implemented on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn scroll_at_point_impl(_x: i32, _y: i32, _direction: &str, _amount: i32) -> Result<(), String> {
+    Err("Autopilot scrolling is only implemented on Windows".to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -934,6 +1023,107 @@ fn read_enter_key(was_enter_down: &mut bool) -> Option<()> {
     } else {
         None
     }
+}
+
+#[cfg(target_os = "windows")]
+fn type_text_impl(text: &str, press_enter: bool) -> Result<(), String> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+    };
+
+    let mut inputs = Vec::new();
+    for c in text.encode_utf16() {
+        inputs.push(keyboard_input_unicode(c, KEYEVENTF_UNICODE));
+        inputs.push(keyboard_input_unicode(c, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+    }
+
+    if !inputs.is_empty() {
+        let sent = unsafe {
+            SendInput(
+                inputs.len() as u32,
+                inputs.as_mut_ptr(),
+                std::mem::size_of::<INPUT>() as i32,
+            )
+        };
+        if sent != inputs.len() as u32 {
+            return Err(format!("SendInput sent {sent} of {} events", inputs.len()));
+        }
+    }
+
+    if press_enter {
+        thread::sleep(Duration::from_millis(100));
+        send_keypress(0x0D)?; // VK_RETURN
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn keyboard_input_unicode(wscan: u16, flags: u32) -> windows_sys::Win32::UI::Input::KeyboardAndMouse::INPUT {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+    };
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: 0,
+                wScan: wscan,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn send_keypress(vk: u16) -> Result<(), String> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+    };
+    let mut inputs = [
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: windows_sys::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: 0,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: windows_sys::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+    ];
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_mut_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        )
+    };
+    if sent != inputs.len() as u32 {
+        return Err(format!("SendInput sent {sent} of {} events", inputs.len()));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn type_text_impl(_text: &str, _press_enter: bool) -> Result<(), String> {
+    Err("Autopilot typing is only implemented on Windows".to_string())
 }
 
 #[cfg(test)]

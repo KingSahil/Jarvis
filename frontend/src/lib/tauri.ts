@@ -72,3 +72,11 @@ export async function clickScreenPoint(x: number, y: number): Promise<void> {
   return invoke('click_screen_point', { x, y });
 }
 
+export async function scrollAtPoint(x: number, y: number, direction: 'down' | 'up', amount: number = 3): Promise<void> {
+  return invoke('scroll_at_point', { x, y, direction, amount });
+}
+
+export async function typeText(text: string, pressEnter: boolean): Promise<void> {
+  return invoke('type_text', { text, pressEnter });
+}
+

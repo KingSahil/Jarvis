@@ -19,8 +19,8 @@ export interface AutopilotRunResult {
   stopReason: 'complete' | 'unsafe_step' | 'missing_target' | 'single_action' | 'unchanged_after_action' | 'max_attempts';
 }
 
-const SAFE_ACTION_HINTS = ['click', 'open', 'select', 'choose', 'go to'];
-const BLOCKED_ACTION_HINTS = ['type', 'enter', 'search', 'submit', 'install', 'enable', 'delete', 'remove', 'buy', 'purchase', 'pay', 'sign in', 'login'];
+const SAFE_ACTION_HINTS = ['click', 'open', 'select', 'choose', 'go to', 'type', 'enter', 'search', 'submit', 'scroll'];
+const BLOCKED_ACTION_HINTS = ['install', 'enable', 'delete', 'remove', 'buy', 'purchase', 'pay', 'sign in', 'login'];
 
 export async function runAutopilotLoop({
   maxAttempts = 5,
@@ -135,4 +135,43 @@ function normalize(value: string | undefined): string {
 
 function defaultWait(): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, 700));
+}
+
+export function extractTextToType(instruction: string): string | null {
+  const normalized = instruction.trim();
+  
+  // Try matching quotes first
+  const quoteMatch = normalized.match(/(?:type|enter|input|search\s+for)\s+['"]([^'"]+)['"]/i);
+  if (quoteMatch && quoteMatch[1]) {
+    return quoteMatch[1];
+  }
+  
+  // Fallback to matching until prepositions or "and press"
+  const fallbackMatch = normalized.match(/(?:type|enter|input|search\s+for)\s+(.+?)(?:\s+(?:into|in|on|to|and\s+press)\b|$)/i);
+  if (fallbackMatch && fallbackMatch[1]) {
+    return fallbackMatch[1].trim();
+  }
+  
+  return null;
+}
+
+export function shouldPressEnterAfterTyping(instruction: string): boolean {
+  const normalized = instruction.toLowerCase();
+  return normalized.includes('press enter') || normalized.includes('press return') || normalized.includes('submit') || normalized.includes('search');
+}
+
+export function isScrollAction(instruction: string): boolean {
+  const norm = normalize(instruction);
+  if (!/\bscroll\b/.test(norm)) return false;
+  const otherVerbs = ['click', 'type', 'enter', 'input', 'search', 'submit', 'select', 'choose', 'go to', 'open'];
+  const startsWithOther = otherVerbs.some(verb => norm.startsWith(verb));
+  return !startsWithOther;
+}
+
+export function getScrollDirection(instruction: string): 'down' | 'up' {
+  const norm = normalize(instruction);
+  if (norm.includes('scroll up')) {
+    return 'up';
+  }
+  return 'down';
 }

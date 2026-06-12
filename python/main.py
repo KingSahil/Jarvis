@@ -105,11 +105,6 @@ def run(
     if web_search_enabled:
         return run_web_intelligence(question, conversation_history, started, warnings)
 
-    if agent_mode:
-        direct_agent_result = try_run_agent_action(question)
-        if direct_agent_result is not None:
-            return build_agent_tool_result(direct_agent_result.to_dict(), started, warnings)
-
     locator_target = extract_locator_target(question)
     force_screen = should_force_screen_context(question, previous_question)
 
@@ -121,12 +116,41 @@ def run(
         preflight = classify_request(question, previous_question, warnings, conversation_history)
         log_stage_timing("preflight", preflight_started)
 
+    intent = "DESKTOP_AUTOMATION"
+    extracted_params = {}
     is_continuation = False
+
     if preflight:
-        is_continuation = bool(preflight.get("is_continuation", False))
+        intent = preflight.get("intent", "DESKTOP_AUTOMATION")
+        extracted_params = preflight.get("extracted_params", {}) or {}
+        is_continuation = preflight.get("is_continuation", False)
     elif previous_question and is_followup_continuation_question(question):
         is_continuation = True
-        
+
+    if agent_mode:
+        direct_agent_result = None
+        if intent == "MEDIA_PLAYBACK":
+            song = extracted_params.get("song_name")
+            if song:
+                from computer_use.tools import play_spotify_track_tool
+                direct_agent_result = play_spotify_track_tool(song)
+        elif intent == "OPEN_APP":
+            app = extracted_params.get("app_name")
+            if app:
+                from computer_use.tools import open_app_tool
+                direct_agent_result = open_app_tool(app)
+        elif intent == "SYSTEM_SHORTCUT":
+            shortcut = extracted_params.get("shortcut")
+            if shortcut:
+                from computer_use.tools import shortcut_tool
+                direct_agent_result = shortcut_tool(shortcut)
+
+        if direct_agent_result is None:
+            direct_agent_result = try_run_agent_action(question)
+
+        if direct_agent_result is not None:
+            return build_agent_tool_result(direct_agent_result.to_dict(), started, warnings)
+
     effective_question = question
     latest_update = None
     if is_continuation and previous_question:
@@ -348,6 +372,16 @@ def get_or_build_visible_ui_map(active_app: dict, screenshot, target_pid: int | 
 # All query resolution is handled automatically by the AI model.
 
 
+def is_in_app_action(app_name: str) -> bool:
+    app_lower = app_name.lower().strip()
+    in_app_keywords = {
+        "tab", "tabs", "settings", "menu", "sidebar", "extensions", "status", "profile",
+        "chat", "chats", "bookmark", "bookmarks", "download", "downloads", "folder", "folders",
+        "file", "files", "history", "recent", "preferences", "terminal", "console"
+    }
+    return any(re.search(rf"\b{re.escape(word)}\b", app_lower) for word in in_app_keywords)
+
+
 def classify_request(
     question: str,
     previous_question: str | None,
@@ -361,9 +395,28 @@ def classify_request(
         warnings.append(f"Preflight classification failed: {exc}")
         return None
 
-    needs_screen = bool(payload.get("needs_screen", True))
+    intent = payload.get("intent")
+    extracted_params = payload.get("extracted_params", {}) or {}
+    
+    # Safety check: if intent is OPEN_APP but targets an in-app feature/action, override to DESKTOP_AUTOMATION
+    if intent == "OPEN_APP":
+        app_name = extracted_params.get("app_name", "")
+        if app_name and is_in_app_action(app_name):
+            LOGGER.info("Overriding OPEN_APP intent with app_name '%s' to DESKTOP_AUTOMATION", app_name)
+            intent = "DESKTOP_AUTOMATION"
+
+    if intent:
+        needs_screen = intent == "DESKTOP_AUTOMATION"
+    else:
+        needs_screen = bool(payload.get("needs_screen", True))
+        intent = "DESKTOP_AUTOMATION" if needs_screen else "INFORMATIONAL_CHAT"
     is_continuation = bool(payload.get("is_continuation", False))
-    return {"needs_screen": needs_screen, "is_continuation": is_continuation}
+    return {
+        "intent": intent,
+        "needs_screen": needs_screen,
+        "is_continuation": is_continuation,
+        "extracted_params": extracted_params
+    }
 
 
 def answer_without_screen(question: str, conversation_history: list[dict] | None = None) -> dict:
